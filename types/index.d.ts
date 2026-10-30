@@ -48,6 +48,11 @@ export type BoardSnapshot = { items: BoardItem[]; readAt: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'mattpocock-skills-deck': { boardView: BoardView; snapshot: BoardSnapshot }
+    'mattpocock-skills-deck': {
+      boardView: BoardView
+      snapshot: BoardSnapshot
+      /** Path of the Container whose detail the Pane shows; absent or null shows the Board. */
+      detail: string | null
+    }
   }
 }

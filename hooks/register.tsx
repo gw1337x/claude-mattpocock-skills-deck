@@ -1,7 +1,7 @@
 import type { Hook, Register } from 'claude-code'
 
 import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView, Kind } from '../types'
-import { actionFor, HEALTH_CHECK_PROMPT } from './actions'
+import { actionFor, containerAction, HEALTH_CHECK_PROMPT, progressOf } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
 import { readMarkdownItems } from './markdown-tracker'
@@ -20,6 +20,7 @@ const fillPrompt = async ($: Engine, text: string) => {
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
 const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
+const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 
 /** Reads the tracker now; nothing is stored, so a render may call it. */
 const readBoard = async ($: Engine): Promise<BoardSnapshot> => {
@@ -76,6 +77,16 @@ const KIND_NAMES: Record<Kind, string> = {
   plain: 'Ticket',
 }
 
+const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
+
+const childrenOf = (items: BoardItem[], path: string): BoardItem[] => items.filter(item => item.parent === path)
+
+const BAR_WIDTH = 20
+const progressBar = (percent: number): string => {
+  const filled = Math.round((percent / 100) * BAR_WIDTH)
+  return `${'█'.repeat(filled)}${'░'.repeat(BAR_WIDTH - filled)} ${percent}%`
+}
+
 const cardLine = (item: BoardItem): string =>
   [
     KIND_NAMES[item.kind],
@@ -124,8 +135,14 @@ export const register: Register = on => {
         : [...current.chips, label]
       await choose({ chips })
     }
-    const renderAction = (item: BoardItem) => {
-      const action = actionFor(item)
+    const showDetail = async (path: string | null) => {
+      await $.state.set(DETAIL, path)
+    }
+    // A Container's Action depends on its children; every other item's on the ladder alone.
+    const actionOf = (item: BoardItem, all: BoardItem[]) =>
+      isContainer(item) ? containerAction(item, childrenOf(all, item.path)) : actionFor(item)
+    const renderAction = (item: BoardItem, all: BoardItem[]) => {
+      const action = actionOf(item, all)
       return action ? (
         <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt)} />
       ) : null
@@ -142,6 +159,30 @@ export const register: Register = on => {
     const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($))
     const { items } = snapshot
     const now = await $.clock.now()
+
+    const detailPath = (await $.state.get(DETAIL)).value ?? null
+    const container = detailPath === null ? undefined : items.find(item => item.path === detailPath && isContainer(item))
+    if (container) {
+      const children = childrenOf(items, container.path)
+        .sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity))
+      const { total, open: openCount, closed: closedCount, percent } = progressOf(children)
+      return (
+        <Box flexDirection="column">
+          <Button key="back" label="Back" onPress={() => showDetail(null)} />
+          <Text bold>{`${KIND_NAMES[container.kind]}: ${container.title}`}</Text>
+          <Text>{`${total} tickets · ${openCount} open · ${closedCount} closed`}</Text>
+          <Text>{progressBar(percent)}</Text>
+          <Box>{renderAction(container, items)}</Box>
+          {children.map(child => (
+            <Box key={`child:${child.path}`} flexDirection="column">
+              <Text>{cardLine(child)}</Text>
+              <Box>{renderAction(child, items)}</Box>
+              {child.warning && <Text dimColor>{child.warning}</Text>}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
 
     const derived = derive(items)
     const { claimable, blocked, closed } = derived.counts
@@ -188,7 +229,10 @@ export const register: Register = on => {
           <Box flexDirection="column">
             <Text>{cardLine(item)}</Text>
             <Box>
-              {renderAction(item)}
+              {renderAction(item, items)}
+              {isContainer(item) && (
+                <Button key={`detail:${item.path}`} label="Details" onPress={() => showDetail(item.path)} />
+              )}
               <Button
                 key={`copy:${item.path}`}
                 label="Copy link"

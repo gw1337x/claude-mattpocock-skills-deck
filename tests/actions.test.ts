@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { BoardItem } from '../types'
-import { actionFor, LADDER } from '../hooks/actions'
+import { actionFor, containerAction, LADDER, progressOf } from '../hooks/actions'
 
 const item = (over: Partial<BoardItem>): BoardItem => ({
   kind: 'plain',
@@ -42,6 +42,32 @@ for (const [name, over, action, skill] of ROWS) {
     expect(found?.prompt).toContain('Something')
   })
 }
+
+const CONTAINER_ROWS: [string, Partial<BoardItem>, ('open' | 'closed')[], string, string][] = [
+  ['Map with open children', { kind: 'map' }, ['closed', 'open'], 'Execute', 'wayfinder'],
+  ['Map with no children', { kind: 'map' }, [], 'Inspect', 'wayfinder'],
+  ['Map with all children resolved', { kind: 'map' }, ['closed', 'closed'], 'Complete', 'wayfinder'],
+  ['Spec with no tickets', { kind: 'spec' }, [], 'Split', 'to-tickets'],
+  ['Spec with open tickets', { kind: 'spec' }, ['closed', 'open'], 'Execute', 'implement-spec'],
+  ['Spec with all tickets closed', { kind: 'spec' }, ['closed'], 'Complete', 'implement-spec'],
+]
+
+for (const [name, over, states, action, skill] of CONTAINER_ROWS) {
+  test(`${name} offers ${action} via /${skill}`, () => {
+    const container = item({ ...over, number: null, path: '.scratch/f/map.md', title: 'Thing' })
+    const children = states.map(state => item({ state }))
+    const found = containerAction(container, children)
+    expect(found?.name).toBe(action)
+    expect(found?.skill).toBe(skill)
+    expect(found?.prompt).toMatch(new RegExp(`^/${skill} \\.scratch/f/map\\.md`))
+    expect(found?.prompt).toContain('Thing')
+  })
+}
+
+test('progress counts closed children and rounds the percentage', () => {
+  expect(progressOf([])).toEqual({ total: 0, open: 0, closed: 0, percent: 0 })
+  expect(progressOf([item({ state: 'closed' }), item({}), item({})])).toEqual({ total: 3, open: 2, closed: 1, percent: 33 })
+})
 
 test('a closed ticket offers no Action', () => {
   expect(actionFor(item({ state: 'closed', labels: ['ready-for-agent'] }))).toBeUndefined()

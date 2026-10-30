@@ -110,6 +110,38 @@ export const actionFor = (item: BoardItem): Action | undefined => {
   return { name: row.name, skill: row.skill, prompt: row.template(item.path, item.title) }
 }
 
+/** Progress across a Container's child Tickets. */
+export type Progress = { total: number; open: number; closed: number; percent: number }
+
+export const progressOf = (children: BoardItem[]): Progress => {
+  const closed = children.filter(child => child.state === 'closed').length
+  const total = children.length
+  return { total, open: total - closed, closed, percent: total === 0 ? 0 : Math.round((closed / total) * 100) }
+}
+
+/**
+ * The one Action for a Map or Spec, decided by its children: Execute while any is open,
+ * Complete once all are closed, and Inspect (Map) or Split (Spec) when it has none.
+ */
+export const containerAction = (container: BoardItem, children: BoardItem[]): Action | undefined => {
+  if (container.state === 'closed') return undefined
+  const { total, open } = progressOf(children)
+  const { path, title } = container
+  if (container.kind === 'map') {
+    if (open > 0) return actionFor(container)
+    if (total === 0)
+      return { name: 'Inspect', skill: 'wayfinder', prompt: about('wayfinder', path, `Inspect the Map "${title}": it has no questions yet; check whether its Fog needs any.`) }
+    return { name: 'Complete', skill: 'wayfinder', prompt: about('wayfinder', path, `Every question on the Map "${title}" is resolved: wrap it up and close it.`) }
+  }
+  if (container.kind === 'spec') {
+    if (total === 0)
+      return { name: 'Split', skill: 'to-tickets', prompt: about('to-tickets', path, `Split the Spec "${title}" into implementation tickets.`) }
+    if (open > 0) return actionFor(container)
+    return { name: 'Complete', skill: 'implement-spec', prompt: about('implement-spec', path, `Every ticket of the Spec "${title}" is closed: confirm it is done and close it.`) }
+  }
+  return actionFor(container)
+}
+
 export const HEALTH_CHECK_PROMPT =
   'Health-check the tracker: find orphaned or broken tickets (missing parents, dangling Blocked-by links, ' +
   'files that do not parse, labels that contradict state) and propose a fix for each. ' +

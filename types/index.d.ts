@@ -60,6 +60,10 @@ declare module 'claude-code' {
       snapshot: BoardSnapshot
       /** Path of the Container whose detail the Pane shows; absent or null shows the Board. */
       detail: string | null
+      /** Which Pane tab is shown; absent means the Board. */
+      tab: 'board' | 'skills'
+      /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
+      skillDetail: string | null
     }
   }
 }

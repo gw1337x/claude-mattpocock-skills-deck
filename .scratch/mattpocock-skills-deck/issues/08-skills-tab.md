@@ -4,9 +4,9 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] All 38 catalogue entries render in their groups
-- [ ] Installed state follows the skills Claude Code has loaded
-- [ ] Load fills the box; Details shows SKILL.md
-- [ ] An installed skill that is not a Matt skill is not listed
+- [x] All 38 catalogue entries render in their groups
+- [x] Installed state follows the skills Claude Code has loaded
+- [x] Load fills the box; Details shows SKILL.md
+- [x] An installed skill that is not a Matt skill is not listed

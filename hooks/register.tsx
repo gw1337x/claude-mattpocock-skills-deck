@@ -13,6 +13,7 @@ import {
   type Run,
 } from './github-tracker'
 import { readMarkdownItems } from './markdown-tracker'
+import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { appendComment, readTicketDetail } from './ticket'
 
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
@@ -30,6 +31,8 @@ const fillPrompt = async ($: Engine, text: string) => {
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
 const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
 const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
+const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
+const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 
 const TRACKER_DOC = 'docs/agents/issue-tracker.md'
 
@@ -95,6 +98,36 @@ const refresh = async ($: Engine) => {
     // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
   }
 }
+
+/** Names of the skills Claude Code has loaded; empty when it cannot say. */
+const loadedSkills = async ($: Engine): Promise<string[]> => {
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    return usage.context.breakdown?.skills?.skillFrontmatter.map(skill => skill.name) ?? []
+  } catch {
+    return []
+  }
+}
+
+/** The text of a skill's SKILL.md, or null when it is in none of the usual places. */
+const readSkillFile = async ($: Engine, name: string): Promise<string | null> => {
+  let home: string | undefined
+  try {
+    home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  } catch {
+    // No home: only the project's skills are tried.
+  }
+  for (const path of skillFiles(name, home)) {
+    try {
+      return await $.fs.read(path)
+    } catch {
+      // Try the next place.
+    }
+  }
+  return null
+}
+
+const marked = (active: boolean, label: string) => (active ? `[${label}]` : label)
 
 const freshness = (readAt: number, now: number): string => {
   const minutes = Math.floor(Math.max(0, now - readAt) / 60_000)
@@ -226,6 +259,56 @@ export const register: Register = on => {
       await refresh($)
     }
 
+    const tab = (await $.state.get(TAB)).value ?? 'board'
+    const tabBar = (
+      <Box>
+        <Button key="tab:board" label={marked(tab === 'board', 'Board')} onPress={() => $.state.set(TAB, 'board')} />
+        <Button key="tab:skills" label={marked(tab === 'skills', 'Skills')} onPress={() => $.state.set(TAB, 'skills')} />
+      </Box>
+    )
+
+    if (tab === 'skills') {
+      const installed = installedMattSkills(await loadedSkills($))
+      const skillName = (await $.state.get(SKILL_DETAIL)).value ?? null
+      if (skillName !== null && installed.has(skillName)) {
+        const text = await readSkillFile($, skillName)
+        return (
+          <Box flexDirection="column">
+            <Button key="back" label="Back" onPress={() => $.state.set(SKILL_DETAIL, null)} />
+            <Text bold>{`/${skillName}`}</Text>
+            {text === null ? <Text dimColor>Could not find SKILL.md for this skill.</Text> : <Markdown text={text} />}
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column">
+          {tabBar}
+          {GROUPS.map(group => (
+            <Box key={`group:${group}`} flexDirection="column">
+              <Text bold>{GROUP_NAMES[group]}</Text>
+              {CATALOGUE.filter(skill => skill.group === group).map(skill =>
+                installed.has(skill.name) ? (
+                  <Box key={`skill:${skill.name}`} flexDirection="column">
+                    <Text>{`/${skill.name} ${skill.purpose}`}</Text>
+                    <Box>
+                      <Button key={`load:${skill.name}`} label="Load" onPress={() => fillPrompt($, `/${skill.name}`)} />
+                      <Button
+                        key={`skill-detail:${skill.name}`}
+                        label="Details"
+                        onPress={() => $.state.set(SKILL_DETAIL, skill.name)}
+                      />
+                    </Box>
+                  </Box>
+                ) : (
+                  <Text key={`skill:${skill.name}`} dimColor>{`/${skill.name} ${skill.purpose} (not installed)`}</Text>
+                ),
+              )}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+
     // Drawing is pure: with no snapshot yet (the Pane opened without /deck) read live, store nothing.
     const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
     const { items } = snapshot
@@ -321,10 +404,10 @@ export const register: Register = on => {
 
     const derived = derive(items)
     const { claimable, blocked, closed } = derived.counts
-    const marked = (active: boolean, label: string) => (active ? `[${label}]` : label)
 
     return (
       <Box flexDirection="column">
+        {tabBar}
         <Text bold>Board</Text>
         <Box>
           <Text dimColor>{freshness(snapshot.readAt, now)}</Text>

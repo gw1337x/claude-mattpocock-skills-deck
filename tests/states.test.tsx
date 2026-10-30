@@ -20,7 +20,11 @@ const PANE = {
 
 const SURFACES = ['terminal', 'desktop'] as const
 
-type Ui = Awaited<ReturnType<Engine['ui']['mount']>>
+type Ui = {
+  findAll: (query: { type: string }) => Promise<{ text?: string }[]>
+  press: (target: { key: string }) => Promise<unknown>
+  unmount: () => Promise<unknown>
+}
 
 const texts = async (ui: Ui) => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
 const mount = ($: Engine, surface: (typeof SURFACES)[number]) => $.ui.mount({ ...PANE, surface })

@@ -30,7 +30,8 @@ const describeFailure = (stderr: string): GhError => {
   return new GhError('other', `gh failed: ${reason}. ${ENV_CHECK}`)
 }
 
-const gh = async (run: Run, argv: string[]): Promise<string> => {
+/** Runs `gh` and returns its output; throws a GhError when it fails. */
+export const runGh = async (run: Run, argv: string[]): Promise<string> => {
   let result: RunResult
   try {
     result = await run(['gh', ...argv])
@@ -42,12 +43,12 @@ const gh = async (run: Run, argv: string[]): Promise<string> => {
 }
 
 /** A `gh` call whose output is JSON; throws a GhError when it fails. */
-export const ghJson = async (run: Run, argv: string[]): Promise<unknown> => JSON.parse(await gh(run, argv))
+export const ghJson = async (run: Run, argv: string[]): Promise<unknown> => JSON.parse(await runGh(run, argv))
 
 /** A secondary lookup: any failure but a rate limit just means "no answer". */
 const ghOptional = async (run: Run, argv: string[]): Promise<unknown> => {
   try {
-    return JSON.parse(await gh(run, argv))
+    return JSON.parse(await runGh(run, argv))
   } catch (error) {
     if (error instanceof GhError && error.kind === 'rate-limit') throw error
     return null
@@ -81,7 +82,7 @@ const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 's
 /** Every issue in the repo as Board items; a Container's sub-issues carry its path as `parent`. */
 export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
   const listed = JSON.parse(
-    await gh(run, [
+    await runGh(run, [
       'issue', 'list', '--state', 'all', '--limit', '500',
       '--json', 'number,title,state,labels,assignees,updatedAt,url,body',
     ]),
@@ -128,7 +129,7 @@ export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
 
 /** An issue's body and its comments' bodies, oldest first. */
 export const readGithubDetail = async (run: Run, number: number): Promise<{ body: string; comments: string[] }> => {
-  const issue = JSON.parse(await gh(run, ['issue', 'view', String(number), '--json', 'body,comments'])) as {
+  const issue = JSON.parse(await runGh(run, ['issue', 'view', String(number), '--json', 'body,comments'])) as {
     body?: string
     comments?: { body?: string }[]
   }
@@ -139,7 +140,7 @@ export const readGithubDetail = async (run: Run, number: number): Promise<{ body
 }
 
 export const postGithubComment = async (run: Run, number: number, text: string): Promise<void> => {
-  await gh(run, ['issue', 'comment', String(number), '--body', text.trim()])
+  await runGh(run, ['issue', 'comment', String(number), '--body', text.trim()])
 }
 
 /** False only when GitHub says the viewer can merely read the repo; an unanswered check allows the box. */

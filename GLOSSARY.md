@@ -55,11 +55,14 @@ _Avoid_: Session chain
 ### Surfaces
 
 **Pane**:
-The deck's side panel: Board, Skills, PRs and Env Check tabs.
+The deck's side panel: Board, Skills, PRs and Env Check tabs, and the Palette view reached from the Board's repo row.
 _Avoid_: Sidebar, right panel
 
 **Env Check**:
 The Pane tab that scores the project's setup as passed checks over applicable checks, one row per check, each failing row with a Fix button that fills a prompt.
+
+**Palette**:
+The Pane view that lists label colours and edits them: on GitHub through `gh label edit`, on Markdown in `docs/agents/label-colors.json` over a built-in default set. Action buttons and label chips take their label's colour from it.
 
 **Capsule band**:
 The row above the prompt with counts, the Work Route and quick Actions.

@@ -4,8 +4,8 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Saving on GitHub runs the expected `gh label edit` calls
-- [ ] Saving on Markdown writes `label-colors.json`, and the defaults apply when the file is absent
-- [ ] Buttons and chips use the saved colours after saving
+- [x] Saving on GitHub runs the expected `gh label edit` calls
+- [x] Saving on Markdown writes `label-colors.json`, and the defaults apply when the file is absent
+- [x] Buttons and chips use the saved colours after saving

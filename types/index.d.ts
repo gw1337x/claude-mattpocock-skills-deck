@@ -63,11 +63,13 @@ declare module 'claude-code' {
       /** Path of the Container whose detail the Pane shows; absent or null shows the Board. */
       detail: string | null
       /** Which Pane tab is shown; absent means the Board. */
-      tab: 'board' | 'skills' | 'prs' | 'env'
+      tab: 'board' | 'skills' | 'prs' | 'env' | 'palette'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
       /** The Env Check rows as last run; absent means the tab runs the checks when drawn. */
       envChecks: EnvCheck[] | null
+      /** Why the last Palette save did not happen; absent or null shows nothing. */
+      paletteNote: string | null
       /** True while the Capsule band's Skills menu is open. */
       skillsMenu: boolean
       /** True while the Capsule band's Work Route list is open. */

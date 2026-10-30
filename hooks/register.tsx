@@ -24,6 +24,16 @@ import {
   readGithubItems,
   type Run,
 } from './github-tracker'
+import {
+  COLORS_FILE,
+  colorOf,
+  parseColor,
+  readGithubColors,
+  readMarkdownColors,
+  saveGithubColor,
+  withSavedColor,
+  type Colors,
+} from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
@@ -86,6 +96,7 @@ const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
+const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 
@@ -169,6 +180,17 @@ const refresh = async ($: Engine) => {
     await $.state.set(SNAPSHOT, await readBoard($, await resolveBackend($)))
   } catch {
     // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
+  }
+}
+
+/** The label colours the Backend holds; a failed `gh` call draws with none. */
+const readColors = async ($: Engine, backend: Backend): Promise<Colors> => {
+  if (backend === 'markdown') return readMarkdownColors(path => $.fs.read(path))
+  try {
+    return await readGithubColors(ghRun($))
+  } catch (error) {
+    if (error instanceof GhError) return {}
+    throw error
   }
 }
 
@@ -475,17 +497,23 @@ export const register: Register = on => {
     const showDetail = async (path: string | null) => {
       await $.state.set(DETAIL, path)
     }
+    const backend = await resolveBackend($)
+    const prsShown = await hasGithubRemote(ghRun($))
+    const stored = (await $.state.get(TAB)).value ?? 'board'
+    const tab = stored === 'prs' && !prsShown ? 'board' : stored
+    // Only the Board and the Palette draw label colours.
+    const colors: Colors = tab === 'board' || tab === 'palette' ? await readColors($, backend) : {}
     // A Container's Action depends on its children; every other item's on the ladder alone.
     const actionOf = (item: BoardItem, all: BoardItem[]) =>
       isContainer(item) ? containerAction(item, childrenOf(all, item.path)) : actionFor(item)
     const renderAction = (item: BoardItem, all: BoardItem[]) => {
       const action = actionOf(item, all)
       return action ? (
-        <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt, titleFor(item))} />
+        <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt, titleFor(item))}>
+          <Text color={colorOf(colors, item.labels)}>{action.name}</Text>
+        </Button>
       ) : null
     }
-
-    const backend = await resolveBackend($)
 
     const postComment = async (item: BoardItem, comment: string) => {
       if (comment.trim() === '') return
@@ -509,9 +537,6 @@ export const register: Register = on => {
     }
 
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
-    const prsShown = await hasGithubRemote(ghRun($))
-    const stored = (await $.state.get(TAB)).value ?? 'board'
-    const tab = stored === 'prs' && !prsShown ? 'board' : stored
     const tabBar = (
       <Box>
         <Button key="tab:board" label={marked(tab === 'board', 'Board')} onPress={() => $.state.set(TAB, 'board')} />
@@ -527,6 +552,55 @@ export const register: Register = on => {
         />
       </Box>
     )
+
+    if (tab === 'palette') {
+      const readOnly = backend === 'github' && !(await canWriteGithub(ghRun($)))
+      const note = (await $.state.get(PALETTE_NOTE)).value ?? null
+      const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
+      const labels = [...new Set([...Object.keys(colors), ...allLabels(snapshot.items)])].sort()
+      const save = async (label: string, text: string) => {
+        const hex = parseColor(text)
+        if (hex === null) {
+          await $.state.set(PALETTE_NOTE, 'Use a 6-digit hex colour, like 0e8a16.')
+          return
+        }
+        try {
+          if (backend === 'github') {
+            await saveGithubColor(ghRun($), label, hex)
+          } else {
+            const existing = await $.fs.read(COLORS_FILE).catch(() => null)
+            await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
+          }
+          await $.state.set(PALETTE_NOTE, null)
+        } catch (error) {
+          if (!(error instanceof GhError)) throw error
+          await $.state.set(PALETTE_NOTE, error.message)
+        }
+      }
+      return (
+        <Box flexDirection="column">
+          {tabBar}
+          <Text bold>Palette</Text>
+          {readOnly && <Text dimColor>You have read-only access to this repo, so Palette saves are disabled.</Text>}
+          {note && <Text>{note}</Text>}
+          {labels.map(label => (
+            <Box key={`color-row:${label}`} flexDirection="column">
+              <Text color={colorOf(colors, [label])}>{`${label}  ${colors[label] ?? 'no colour'}`}</Text>
+              {Input && !readOnly && (
+                <Input
+                  key={`color:${label}`}
+                  label={`Colour for ${label}`}
+                  placeholder="6-digit hex"
+                  value={colors[label] ?? ''}
+                  submitLabel="save"
+                  onSubmit={(value: string) => save(label, value)}
+                />
+              )}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
 
     if (tab === 'prs') {
       let prs: Pr[] = []
@@ -754,11 +828,16 @@ export const register: Register = on => {
               key={`chip:${label}`}
               label={marked(view.chips.includes(label), label)}
               onPress={() => toggleChip(label)}
-            />
+            >
+              <Text color={colorOf(colors, [label])}>{marked(view.chips.includes(label), label)}</Text>
+            </Button>
           ))}
         </Box>
         {snapshot.error && <Text>{snapshot.error}</Text>}
-        <Text dimColor>Backend: {BACKEND_NAMES[backend]}</Text>
+        <Box>
+          <Text dimColor>Backend: {BACKEND_NAMES[backend]}</Text>
+          <Button key="palette" label="Palette" onPress={() => $.state.set(TAB, 'palette')} />
+        </Box>
         <Box>
           {(Object.keys(BACKEND_NAMES) as Backend[]).map(name => (
             <Button

@@ -77,9 +77,12 @@ export const serveGh = (
     remote?: string
     /** `gh auth status` fails while everything else works. */
     loggedOut?: boolean
+    /** Colours (6-digit hex) the repo's labels have, by label name; `gh label edit --color` changes them. */
+    colors?: Record<string, string>
   } = {},
 ): GhServer => {
   const server: GhServer = { calls: [], comments: { ...options.comments } }
+  const colors = { ...options.colors }
   const reply = (stdout: string, exitCode = 0, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
   })
@@ -101,6 +104,13 @@ export const serveGh = (
     if (line === '--version') return reply('gh version 2.60.0\n')
     if (line === 'auth status') {
       return options.loggedOut ? reply('', 1, 'You are not logged into any GitHub hosts. Run gh auth login') : reply('Logged in\n')
+    }
+    if (line.startsWith('label list') && line.includes('color')) {
+      return reply(JSON.stringify(Object.entries(colors).map(([name, color]) => ({ name, color }))))
+    }
+    if (argv[1] === 'label' && argv[2] === 'edit') {
+      colors[argv[3] ?? ''] = argv[argv.indexOf('--color') + 1] ?? ''
+      return reply('')
     }
     if (line.startsWith('label list')) {
       const names = options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug']

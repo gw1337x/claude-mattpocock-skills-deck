@@ -48,9 +48,18 @@ export const serveFiles = (
     if (text === undefined) return { deny: `ENOENT: ${e.path}` }
     return { value: text }
   })
-  /** A write lands in `files`, which the test reads back; a path the fixture does not know is kept as given. */
+  /** A new file is keyed by the longest suffix of its path that sits in a folder the fixture knows. */
+  const newKey = (path: string): string => {
+    const parts = path.replace(/\\/g, '/').split('/')
+    for (let i = 0; i < parts.length; i++) {
+      const parent = parts.slice(i, -1).join('/')
+      if (parent !== '' && isDir(parent)) return parts.slice(i).join('/')
+    }
+    return parts.join('/')
+  }
+  /** A write lands in `files`, which the test reads back. */
   on('fs.write', (_, e) => {
-    files[relative(e.path) ?? e.path.replace(/\\/g, '/')] = e.text
+    files[relative(e.path) ?? newKey(e.path)] = e.text
     return { value: undefined }
   })
   on('fs.list', (_, e) => {

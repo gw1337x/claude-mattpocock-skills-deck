@@ -1,4 +1,5 @@
 import type { BoardItem, Kind } from '../types'
+import { readProgress } from './derive'
 
 /** The slice of `$.fs` the Markdown tracker needs. */
 export type Fs = {
@@ -88,6 +89,11 @@ export const detectKind = (
   if (fileName === 'map.md') return 'map'
   if (fileName === 'spec.md') return 'spec'
   return 'plain'
+}
+
+export const progressField = (body: string) => {
+  const progress = readProgress(body)
+  return progress === undefined ? {} : { progress }
 }
 
 /** Parses one tracker file into a Board item; a file that does not parse becomes a plain Ticket with a warning. */

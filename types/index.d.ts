@@ -37,6 +37,8 @@ export type BoardItem = {
   parent: string | null
   /** Set when the file did not parse and was kept as a plain Ticket. */
   warning?: string
+  /** Percent from the body's `## Progress` section, when it has one. */
+  progress?: number
   /** Web address of the ticket, when the Backend has one (GitHub). */
   url?: string
 }

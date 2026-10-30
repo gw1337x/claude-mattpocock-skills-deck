@@ -54,7 +54,7 @@ for (const surface of SURFACES) {
 
     expect(log.fills).toHaveLength(1)
     expect(log.fills[0]?.mode).toBe('replace')
-    expect(log.fills[0]?.text).toMatch(/^\/triage /)
+    expect(log.fills[0]?.text).toMatch(/^\/triage\n/)
     expect(log.fills[0]?.text).toContain('Login crashes on empty password')
     expect(log.asked).toBe(0)
     expect(log.submitted).toBe(0)

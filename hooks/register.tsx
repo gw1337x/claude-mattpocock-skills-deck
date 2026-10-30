@@ -25,7 +25,7 @@ import {
   statusOf,
   statusTag,
 } from './board-ui'
-import { allLabels, DEFAULT_VIEW, derive, visibleItems, type Derived } from './derive'
+import { allLabels, DEFAULT_VIEW, derive, progressText, visibleItems, type Derived } from './derive'
 import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
@@ -74,8 +74,14 @@ const fillPrompt = async ($: Engine, text: string, title?: string | null) => {
   await $.state.set(FILLED, isFilled && title !== undefined ? { text, title } : null)
 }
 
-/** The first line of a prompt: the slash command and the ticket it names. */
-const headOf = (text: string) => text.split(/\r?\n/)[0]?.trim() ?? ''
+/** The first two lines of a prompt: the slash command and the ticket it names, which DSH's templates put on separate lines. */
+const headOf = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .slice(0, 2)
+    .join('\n')
 
 const DRAFT_WORDS = 5
 const draftTitle = (text: string) =>
@@ -654,6 +660,9 @@ export const register: Register = on => {
               <Link href={item.url ?? item.path}>↗</Link>
             </Box>
           </Box>
+          {!isContainer(item) && (
+            <Text dimColor size="footnote">{progressText(item)}</Text>
+          )}
           {item.warning && <Text color={STATUS_STYLES.blocked.color} size="footnote">{`⚠ ${item.warning}`}</Text>}
         </Box>
       )

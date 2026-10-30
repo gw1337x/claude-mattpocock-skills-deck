@@ -1,5 +1,5 @@
 import type { BoardItem } from '../types'
-import { detectKind } from './markdown-tracker'
+import { detectKind, progressField } from './markdown-tracker'
 
 export type RunResult = { exitCode: number; stdout: string; stderr: string }
 /** Runs a command by its argument vector; rejects when it cannot start. */
@@ -104,6 +104,7 @@ export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
       claimed: (issue.assignees ?? []).length > 0,
       updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
       parent: null,
+      ...progressField(body),
       url: issue.url,
     }
   })

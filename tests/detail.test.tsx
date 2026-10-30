@@ -69,7 +69,7 @@ for (const surface of SURFACES) {
     expect(await texts(ui)).toContain('2 tickets · 2 open · 0 closed')
     await ui.press({ key: `action:${SPEC}` })
 
-    expect(fills[0]).toMatch(/^\/implement-spec /)
+    expect(fills[0]).toMatch(/^\/implement-spec\n/)
     await ui.unmount()
   })
 
@@ -84,8 +84,8 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'action:.scratch/a/spec.md' })
     await ui.press({ key: 'action:.scratch/b/map.md' })
 
-    expect(fills[0]).toMatch(/^\/to-tickets /)
-    expect(fills[1]).toMatch(/^\/wayfinder [\s\S]*Inspect/)
+    expect(fills[0]).toMatch(/^\/to-tickets\n/)
+    expect(fills[1]).toMatch(/^\/wayfinder [\s\S]*Target map/)
     await ui.unmount()
   })
 
@@ -102,8 +102,8 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'action:.scratch/b/map.md' })
     await ui.press({ key: 'action:.scratch/a/spec.md' })
 
-    expect(fills[0]).toMatch(/^\/wayfinder [\s\S]*resolved/)
-    expect(fills[1]).toMatch(/^\/implement-spec [\s\S]*closed/)
+    expect(fills[0]).toMatch(/^\/wayfinder\n[\s\S]*Completion check/)
+    expect(fills[1]).toMatch(/^All implementation issues[\s\S]*closed/)
     await ui.unmount()
   })
 
@@ -150,7 +150,7 @@ for (const surface of SURFACES) {
     expect(shown).toContain('First comment.')
     expect(shown).not.toContain('## Comments')
     await ui.press({ key: `action:${BLOCKED}` })
-    expect(fills[0]).toMatch(/^\/implement /)
+    expect(fills[0]).toMatch(/^\/implement\n/)
     await ui.unmount()
   })
 

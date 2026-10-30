@@ -143,7 +143,7 @@ for (const backend of BACKENDS) {
       await ui.press({ key: 'back' })
 
       await ui.press({ key: `action:${backend.spec}` })
-      expect(fills[0]).toMatch(/^\/implement-spec /)
+      expect(fills[0]).toMatch(/^\/implement-spec\n/)
       await ui.unmount()
     })
 
@@ -158,7 +158,7 @@ for (const backend of BACKENDS) {
       expect(shown).toContain('A button.')
       expect(shown).toContain('PDF renderer')
       await ui.press({ key: `action:${backend.blocked}` })
-      expect(fills[0]).toMatch(/^\/implement /)
+      expect(fills[0]).toMatch(/^\/implement\n/)
 
       await ui.press({ key: `blocker:${backend.blocker}` })
       expect(await texts(ui)).toContain('Implementation: PDF renderer')

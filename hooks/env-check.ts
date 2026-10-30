@@ -1,16 +1,8 @@
-import type { Backend } from '../types'
+import type { Backend, Check } from '../types'
 import type { Run } from './github-tracker'
 import { installedMattSkills } from './skills'
 
-export type Check = {
-  id: string
-  label: string
-  ok: boolean
-  /** Why it fails, when that is more than the label says. */
-  detail?: string
-  /** The prompt the failing row's button puts in the box. */
-  fix: string
-}
+export type { Check }
 
 /** The labels the triage flow speaks in; `docs/agents/triage-labels.md` maps them to a repo's own strings. */
 export const WORKFLOW_LABELS = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix']

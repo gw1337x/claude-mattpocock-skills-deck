@@ -1,0 +1,12 @@
+{
+  "name": "skillsdeck",
+  "owner": { "name": "gw1337x" },
+  "description": "Claude Code mods for the mattpocock/skills workflow.",
+  "plugins": [
+    {
+      "name": "mattpocock-skills-deck",
+      "source": "./",
+      "description": "A task board beside the chat for the mattpocock/skills workflow: Maps, Specs and Tickets with one next Action each."
+    }
+  ]
+}

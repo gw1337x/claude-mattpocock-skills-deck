@@ -1,5 +1,3 @@
-import type { Check as EnvCheck } from '../hooks/env-check'
-
 export type Backend = 'github' | 'markdown'
 
 export type Kind =
@@ -41,6 +39,17 @@ export type BoardItem = {
   url?: string
 }
 
+/** One row of the Env Check tab. */
+export type Check = {
+  id: string
+  label: string
+  ok: boolean
+  /** Why it fails, when that is more than the label says. */
+  detail?: string
+  /** The prompt the failing row's button puts in the box. */
+  fix: string
+}
+
 export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'claimable'
 export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 
@@ -67,7 +76,7 @@ declare module 'claude-code' {
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
       /** The Env Check rows as last run; absent means the tab runs the checks when drawn. */
-      envChecks: EnvCheck[] | null
+      envChecks: Check[] | null
       /** Why the last Palette save did not happen; absent or null shows nothing. */
       paletteNote: string | null
       /** True while the Capsule band's Skills menu is open. */

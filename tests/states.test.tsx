@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { boardCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -48,7 +49,7 @@ for (const surface of SURFACES) {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
-    expect(await texts(ui)).toContain('Claimable 3 · Blocked 1 · Closed 1')
+    expect(await boardCounts(ui)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
     await ui.unmount()
   })
 
@@ -58,7 +59,7 @@ for (const surface of SURFACES) {
     })
     const ui = await mount($, surface)
 
-    expect(await texts(ui)).toContain('Claimable 0 · Blocked 1 · Closed 0')
+    expect(await boardCounts(ui)).toEqual({ claimable: 0, blocked: 1, closed: 0 })
     await ui.unmount()
   })
 
@@ -69,7 +70,7 @@ for (const surface of SURFACES) {
     })
     const ui = await mount($, surface)
 
-    expect(await texts(ui)).toContain('Claimable 1 · Blocked 0 · Closed 1')
+    expect(await boardCounts(ui)).toEqual({ claimable: 1, blocked: 0, closed: 1 })
     await ui.unmount()
   })
 
@@ -99,9 +100,9 @@ for (const surface of SURFACES) {
 
     await ui.press({ key: 'filter:closed' })
     expect(await shown(ui)).toEqual([])
-    expect(await texts(ui)).toContainEqual(expect.stringMatching(/Done thing.*closed/))
+    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Done thing.*Closed/))
     // A closed child of a Map is listed too, as the Closed count includes it.
-    expect(await texts(ui)).toContainEqual(expect.stringMatching(/Research payment providers.*closed/))
+    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Research payment providers.*Closed/))
 
     await ui.press({ key: 'filter:open' })
     expect(await texts(ui)).not.toContainEqual(expect.stringMatching(/Done thing/))

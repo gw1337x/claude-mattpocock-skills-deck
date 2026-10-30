@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { boardCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 import { serveGh } from './serve-gh'
 import type { GhFailure, GhServer } from './serve-gh'
@@ -100,11 +101,11 @@ for (const backend of BACKENDS) {
     test(`the Board lists Maps, Specs and standalone Tickets, not children: ${label}`, async ($, on) => {
       backend.serve(on)
       const ui = await mount($, surface)
-      const cards = await texts(ui)
+      const cards = await cardTexts(ui)
 
       expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
       expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
-      expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*needs-triage.*open/))
+      expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*Claimable.*needs-triage/))
       expect(cards.some(c => /Download button/.test(c))).toBe(false)
       await ui.unmount()
     })
@@ -113,7 +114,7 @@ for (const backend of BACKENDS) {
       backend.serve(on)
       const ui = await mount($, surface)
 
-      expect(await texts(ui)).toContain('Claimable 3 · Blocked 1 · Closed 1')
+      expect(await boardCounts(ui)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
       await ui.unmount()
     })
 

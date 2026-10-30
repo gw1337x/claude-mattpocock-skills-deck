@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { boardCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -113,11 +114,8 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'filter:open' })
     await ui.press({ key: `detail:${MAP}` })
     await ui.press({ key: 'back' })
-    const shown = await texts(ui)
-    const buttons = (await ui.findAll({ type: 'Button' })).map(b => (b as { text?: string }).text)
-
-    expect(shown).toContain('Board')
-    expect(buttons).toContain('[Open]')
+    expect(await isOn(ui, 'tab:board')).toBe(true)
+    expect(await isOn(ui, 'filter:open')).toBe(true)
     await ui.unmount()
   })
 }

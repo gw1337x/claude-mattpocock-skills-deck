@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { boardCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -106,8 +107,7 @@ for (const surface of SURFACES) {
     const band = await mountBand($, surface)
     const pane = await mountPane($, surface)
 
-    const board = await everything(pane)
-    expect(board).toContain('Claimable 3 · Blocked 1 · Closed 1')
+    expect(await boardCounts(pane)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
     const shown = await everything(band)
     expect(shown).toContain('Claimable 3')
     expect(shown).toContain('Blocked 1')
@@ -124,21 +124,21 @@ for (const surface of SURFACES) {
     await band.press({ key: 'count:blocked' })
     expect(log.opened).toEqual(['deck'])
     let pane = await mountPane($, surface)
-    expect(await everything(pane)).toContain('[Blocked]')
+    expect(await isOn(pane, 'filter:blocked')).toBe(true)
     expect((await everything(pane)).some(t => /Download button/.test(t))).toBe(true)
     await pane.unmount()
 
     await band.press({ key: 'count:claimable' })
     pane = await mountPane($, surface)
-    expect(await everything(pane)).toContain('[Claimable]')
+    expect(await isOn(pane, 'filter:claimable')).toBe(true)
     await pane.unmount()
 
     await band.press({ key: 'count:needs-triage' })
     expect(log.opened).toHaveLength(3)
     pane = await mountPane($, surface)
     const board = await everything(pane)
-    expect(board).toContain('[Open]')
-    expect(board).toContain('[needs-triage]')
+    expect(await isOn(pane, 'filter:open')).toBe(true)
+    expect(await isOn(pane, 'chip:needs-triage')).toBe(true)
     expect(board.some(t => /Login crashes/.test(t))).toBe(true)
     expect(board.some(t => /Invoice export/.test(t))).toBe(false)
     await pane.unmount()

@@ -1,6 +1,6 @@
 import type { Hook, Register } from 'claude-code'
 
-import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView, Kind } from '../types'
+import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView } from '../types'
 import {
   actionFor,
   BUG_PROMPT,
@@ -14,7 +14,18 @@ import {
   progressOf,
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
-import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
+import {
+  actionText,
+  KIND_NAMES,
+  KIND_STYLES,
+  labelPill,
+  numberText,
+  progressMark,
+  STATUS_STYLES,
+  statusOf,
+  statusTag,
+} from './board-ui'
+import { allLabels, DEFAULT_VIEW, derive, visibleItems, type Derived } from './derive'
 import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
@@ -105,6 +116,18 @@ const repoKey = async ($: Engine): Promise<string> => {
     return (await $.session.repo())?.root ?? 'default'
   } catch {
     return 'default'
+  }
+}
+
+/** `owner/repo` from the remote, else the folder's name, for the Pane's header. */
+const repoName = async ($: Engine): Promise<string> => {
+  try {
+    const repo = await $.session.repo()
+    const fromRemote = repo?.remote?.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/)?.[1]
+    if (fromRemote) return fromRemote
+    return repo?.root.split(/[\\/]/).filter(Boolean).pop() ?? 'this folder'
+  } catch {
+    return 'this folder'
   }
 }
 
@@ -296,18 +319,6 @@ const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) =
   await $.state.set(DETAIL, null)
   await $.ui.open({ id: PANE, title: PANE_TITLE })
 }
-const KIND_NAMES: Record<Kind, string> = {
-  map: 'Map',
-  spec: 'Spec',
-  implementation: 'Implementation',
-  research: 'Research',
-  prototype: 'Prototype',
-  grilling: 'Grilling',
-  task: 'Task',
-  bug: 'Bug',
-  plain: 'Ticket',
-}
-
 /** What a session working this item is called: its number, or its kind for a Container, then its title. */
 const titleFor = (item: BoardItem): string =>
   `[${item.number === null ? KIND_NAMES[item.kind] : `#${item.number}`}] ${item.title}`
@@ -510,9 +521,63 @@ export const register: Register = on => {
       const action = actionOf(item, all)
       return action ? (
         <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt, titleFor(item))}>
-          <Text color={colorOf(colors, item.labels)}>{action.name}</Text>
+          <Text color={colorOf(colors, item.labels) ?? KIND_STYLES[item.kind].color} bold>
+            {actionText(action.name)}
+          </Text>
         </Button>
       ) : null
+    }
+    const Svg = 'Svg' in elements ? elements.Svg : undefined
+    /** One item as DSH draws it: a bordered card in its Kind's colour, title row over labels and controls. */
+    const renderCard = (item: BoardItem, all: BoardItem[], derived: Derived) => {
+      const kind = KIND_STYLES[item.kind]
+      const number = numberText(item)
+      const status = statusOf(item, derived)
+      const progress = isContainer(item) ? progressOf(childrenOf(all, item.path)) : null
+      const closed = status === 'closed'
+      return (
+        <Box
+          key={`card:${item.path}`}
+          flexDirection="column"
+          flexShrink={0}
+          borderStyle="round"
+          borderColor={closed ? '#484f58' : kind.color}
+          padding="sm"
+          rowGap="xs"
+          hover={{ borderColor: '#c9d1d9' }}
+        >
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap="sm">
+            <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="sm" flexShrink={1}>
+              <Text color={kind.color} size="footnote" weight="semibold">{`${kind.icon} ${kind.name}`}</Text>
+              {number && <Text color={kind.color} size="footnote" mono>{number}</Text>}
+              <Button key={`detail:${item.path}`} label={item.title} plain onPress={() => showDetail(item.path)}>
+                <Text weight="semibold" dimColor={closed}>{item.title}</Text>
+              </Button>
+            </Box>
+            {progress
+              ? progressMark(elements, Svg, progress.closed, progress.total, kind.color)
+              : statusTag(elements, status)}
+          </Box>
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="sm">
+            <Box flexDirection="row" flexWrap="wrap" columnGap="xs" rowGap="xs" flexShrink={1}>
+              {item.labels.map(label => labelPill(elements, colors, label, `label:${item.path}:${label}`))}
+            </Box>
+            <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
+              {renderAction(item, all)}
+              <Button
+                key={`copy:${item.path}`}
+                label="Copy link"
+                dimColor
+                onPress={press => $.ui.copy({ text: item.url ?? item.path, surface: press.surface })}
+              >
+                ⧉
+              </Button>
+              <Link href={item.url ?? item.path}>↗</Link>
+            </Box>
+          </Box>
+          {item.warning && <Text color={STATUS_STYLES.blocked.color} size="footnote">{`⚠ ${item.warning}`}</Text>}
+        </Box>
+      )
     }
 
     const postComment = async (item: BoardItem, comment: string) => {
@@ -537,19 +602,39 @@ export const register: Register = on => {
     }
 
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
+    const TABS: ['board' | 'skills' | 'prs' | 'env', string][] = [
+      ['board', '☰ Board'],
+      ['skills', '◎ Skills'],
+      ...(prsShown ? [['prs', '⇄ PRs'] as ['prs', string]] : []),
+      ['env', '✲ Env Check'],
+    ]
     const tabBar = (
-      <Box>
-        <Button key="tab:board" label={marked(tab === 'board', 'Board')} onPress={() => $.state.set(TAB, 'board')} />
-        <Button key="tab:skills" label={marked(tab === 'skills', 'Skills')} onPress={() => $.state.set(TAB, 'skills')} />
-        {prsShown && <Button key="tab:prs" label={marked(tab === 'prs', 'PRs')} onPress={() => $.state.set(TAB, 'prs')} />}
-        <Button
-          key="tab:env"
-          label={marked(tab === 'env', 'Env Check')}
-          onPress={async () => {
-            await recheck()
-            await $.state.set(TAB, 'env')
-          }}
-        />
+      <Box flexDirection="column" flexShrink={0} rowGap="sm" marginBottom="md">
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="md">
+          <Text color="#58a6ff" weight="semibold" mono>{`⌂ ${await repoName($)}`}</Text>
+          <Box flexDirection="row" columnGap="xs">
+            <Button key="pane-new" label="New" onPress={() => startNew($)}>
+              <Text color={KIND_STYLES.map.color}>◈ New ▾</Text>
+            </Button>
+            <Button key="pane-bug" label="+Bug" onPress={() => startBug($)}>
+              <Text color={KIND_STYLES.bug.color}>✱ +Bug</Text>
+            </Button>
+          </Box>
+        </Box>
+        <Box flexDirection="row" flexWrap="wrap" columnGap="xs">
+          {TABS.map(([id, label]) => (
+            <Button
+              key={`tab:${id}`}
+              label={label}
+              variant={tab === id ? 'primary' : undefined}
+              dimColor={tab !== id}
+              onPress={async () => {
+                if (id === 'env') await recheck()
+                await $.state.set(TAB, id)
+              }}
+            />
+          ))}
+        </Box>
       </Box>
     )
 
@@ -704,6 +789,7 @@ export const register: Register = on => {
     const { items } = snapshot
     const now = await $.clock.now()
 
+    const derivedItems = derive(items)
     const detailPath = (await $.state.get(DETAIL)).value ?? null
     const container = detailPath === null ? undefined : items.find(item => item.path === detailPath && isContainer(item))
     if (container) {
@@ -717,16 +803,7 @@ export const register: Register = on => {
           <Text>{`${total} tickets · ${openCount} open · ${closedCount} closed`}</Text>
           <Text>{progressBar(percent)}</Text>
           <Box>{renderAction(container, items)}</Box>
-          {children.map(child => (
-            <Box key={`child:${child.path}`} flexDirection="column">
-              <Text>{cardLine(child)}</Text>
-              <Box>
-                {renderAction(child, items)}
-                <Button key={`detail:${child.path}`} label="Details" onPress={() => showDetail(child.path)} />
-              </Box>
-              {child.warning && <Text dimColor>{child.warning}</Text>}
-            </Box>
-          ))}
+          {children.map(child => renderCard(child, items, derivedItems))}
         </Box>
       )
     }
@@ -792,78 +869,66 @@ export const register: Register = on => {
       )
     }
 
-    const derived = derive(items)
-    const { claimable, blocked, closed } = derived.counts
+    const { claimable, blocked, closed } = derivedItems.counts
+    const cards = visibleItems(items, derivedItems, view)
+    const chip = (key: string, label: string, active: boolean, onPress: () => unknown, color?: string) => (
+      <Button key={key} label={label} variant={active ? 'primary' : undefined} onPress={onPress}>
+        <Text color={active ? undefined : color} dimColor={!active && color === undefined}>
+          {label}
+        </Text>
+      </Button>
+    )
+    const divider = <Text dimColor>│</Text>
 
     return (
       <Box flexDirection="column">
         {tabBar}
-        <Text bold>Board</Text>
-        <Box>
-          <Text dimColor>{freshness(snapshot.readAt, now)}</Text>
-          <Button key="refresh" label="Refresh" onPress={() => refresh($)} />
-        </Box>
-        <Text>{`Claimable ${claimable} · Blocked ${blocked} · Closed ${closed}`}</Text>
-        <Box>
-          {FILTERS.map(([filter, label]) => (
-            <Button
-              key={`filter:${filter}`}
-              label={marked(view.filter === filter, label)}
-              onPress={() => choose({ filter })}
-            />
-          ))}
-        </Box>
-        <Box>
-          {SORTS.map(([sort, label]) => (
-            <Button
-              key={`sort:${sort}`}
-              label={marked(view.sort === sort, label)}
-              onPress={() => choose({ sort })}
-            />
-          ))}
-        </Box>
-        <Box>
-          {allLabels(items).map(label => (
-            <Button
-              key={`chip:${label}`}
-              label={marked(view.chips.includes(label), label)}
-              onPress={() => toggleChip(label)}
-            >
-              <Text color={colorOf(colors, [label])}>{marked(view.chips.includes(label), label)}</Text>
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="md">
+          <Box key="counts" flexDirection="row" columnGap="md">
+            <Text color={STATUS_STYLES.claimable.color} weight="semibold">{`${STATUS_STYLES.claimable.icon} ${claimable} Claimable`}</Text>
+            <Text color={STATUS_STYLES.blocked.color} weight="semibold">{`${STATUS_STYLES.blocked.icon} ${blocked} Blocked`}</Text>
+            <Text dimColor>{`${STATUS_STYLES.closed.icon} ${closed} Closed`}</Text>
+          </Box>
+          <Box flexDirection="row" alignItems="center" columnGap="xs">
+            <Button key="health" label="Health check" onPress={() => fillPrompt($, HEALTH_CHECK_PROMPT)}>
+              ♥ Health check
             </Button>
-          ))}
+            <Button key="refresh" label="Refresh" onPress={() => refresh($)}>
+              ↻ Refresh
+            </Button>
+            <Text dimColor size="footnote">{freshness(snapshot.readAt, now)}</Text>
+          </Box>
         </Box>
-        {snapshot.error && <Text>{snapshot.error}</Text>}
-        <Box>
-          <Text dimColor>Backend: {BACKEND_NAMES[backend]}</Text>
-          <Button key="palette" label="Palette" onPress={() => $.state.set(TAB, 'palette')} />
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs" marginY="md">
+          {FILTERS.map(([filter, label]) => chip(`filter:${filter}`, label, view.filter === filter, () => choose({ filter })))}
+          {divider}
+          {SORTS.map(([sort, label]) => chip(`sort:${sort}`, label, view.sort === sort, () => choose({ sort })))}
+          {allLabels(items).length > 0 && divider}
+          {allLabels(items).map(label =>
+            chip(`chip:${label}`, label, view.chips.includes(label), () => toggleChip(label), colorOf(colors, [label])),
+          )}
         </Box>
-        <Box>
+        {snapshot.error && <Text color={STATUS_STYLES.blocked.color}>{`⚠ ${snapshot.error}`}</Text>}
+        {cards.length === 0 && <Text dimColor>Nothing matches this view.</Text>}
+        <Box flexDirection="column" rowGap="sm">
+          {cards.map(item => renderCard(item, items, derivedItems))}
+        </Box>
+        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" marginTop="md">
+          <Text dimColor size="footnote">Backend: {BACKEND_NAMES[backend]}</Text>
           {(Object.keys(BACKEND_NAMES) as Backend[]).map(name => (
             <Button
               key={`backend:${name}`}
-              label={marked(backend === name, BACKEND_NAMES[name])}
+              label={BACKEND_NAMES[name]}
+              variant={backend === name ? 'primary' : undefined}
+              dimColor={backend !== name}
               onPress={() => switchBackend(name)}
             />
           ))}
+          {divider}
+          <Button key="palette" label="Palette" dimColor onPress={() => $.state.set(TAB, 'palette')}>
+            ◐ Palette
+          </Button>
         </Box>
-        <Button key="health" label="Health check" onPress={() => fillPrompt($, HEALTH_CHECK_PROMPT)} />
-        {visibleItems(items, derived, view).map(item => (
-          <Box flexDirection="column">
-            <Text>{cardLine(item)}</Text>
-            <Box>
-              {renderAction(item, items)}
-              <Button key={`detail:${item.path}`} label="Details" onPress={() => showDetail(item.path)} />
-              <Button
-                key={`copy:${item.path}`}
-                label="Copy link"
-                onPress={press => $.ui.copy({ text: item.url ?? item.path, surface: press.surface })}
-              />
-              <Link href={item.url ?? item.path}>Open</Link>
-            </Box>
-            {item.warning && <Text dimColor>{item.warning}</Text>}
-          </Box>
-        ))}
       </Box>
     )
   })

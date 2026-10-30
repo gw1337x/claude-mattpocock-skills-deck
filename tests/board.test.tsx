@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { boardCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -30,13 +31,13 @@ for (const surface of SURFACES) {
   test(`the Board lists every Map, Spec and standalone Ticket with its Kind on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mountBoard($, surface)
-    const cards = await texts(ui)
+    const cards = await cardTexts(ui)
 
-    expect(cards).toContain('Board')
+    expect(await isOn(ui, 'tab:board')).toBe(true)
     expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     expect(cards).toContainEqual(
-      expect.stringMatching(/Bug.*loose #1.*Login crashes on empty password.*needs-triage.*open/),
+      expect.stringMatching(/Bug.*loose #1.*Login crashes on empty password.*Claimable.*needs-triage/),
     )
     // Children of a Container are not listed on the Board.
     expect(cards.some(c => /Download button/.test(c))).toBe(false)
@@ -46,9 +47,9 @@ for (const surface of SURFACES) {
   test(`a file that does not parse is a plain Ticket with a warning on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mountBoard($, surface)
-    const cards = await texts(ui)
+    const cards = await cardTexts(ui)
 
-    expect(cards).toContainEqual(expect.stringMatching(/Ticket.*loose #2.*garbled.*open/))
+    expect(cards).toContainEqual(expect.stringMatching(/Ticket.*loose #2.*garbled.*Open/))
     expect(cards).toContainEqual(expect.stringMatching(/Could not read this file/))
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     await ui.unmount()
@@ -76,19 +77,15 @@ for (const surface of SURFACES) {
     })
     const ui = await mountBoard($, surface)
 
-    expect(await texts(ui)).toContainEqual(
-      expect.stringMatching(/Research.*loose #1.*Both labels.*claimed.*open/),
-    )
+    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Research.*loose #1.*Both labels.*Claimed/))
     await ui.unmount()
   })
 
   test(`one unreadable feature folder does not hide the rest of the Board on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER, '.scratch/loose/issues')
     const ui = await mountBoard($, surface)
-    const cards = await texts(ui)
-
-    expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
-    expect(cards).toContainEqual(expect.stringMatching(/Could not read.*loose/))
+    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
+    expect(await texts(ui)).toContainEqual(expect.stringMatching(/Could not read.*loose/))
     await ui.unmount()
   })
 

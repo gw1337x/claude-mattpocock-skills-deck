@@ -52,7 +52,7 @@ const readNumber = (fileName: string): number | null => {
 }
 
 /** Kind detection, in order: `Type:` line, `wayfinder:*` label, `bug` label, body shape, container file name, else plain. */
-const detectKind = (
+export const detectKind = (
   text: string,
   fields: Map<string, string>,
   labels: string[],

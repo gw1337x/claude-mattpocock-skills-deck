@@ -4,6 +4,14 @@ import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardVi
 import { actionFor, containerAction, HEALTH_CHECK_PROMPT, progressOf } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
+import {
+  canWriteGithub,
+  GhError,
+  postGithubComment,
+  readGithubDetail,
+  readGithubItems,
+  type Run,
+} from './github-tracker'
 import { readMarkdownItems } from './markdown-tracker'
 import { appendComment, readTicketDetail } from './ticket'
 
@@ -23,21 +31,59 @@ const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as con
 const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
 const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 
-/** Reads the tracker now; nothing is stored, so a render may call it. */
-const readBoard = async ($: Engine): Promise<BoardSnapshot> => {
-  // `$.fs` cannot be passed as a value; each call is spelled out.
-  const items = await readMarkdownItems({
-    read: path => $.fs.read(path),
-    list: path => $.fs.list(path),
-    exists: path => $.fs.exists(path),
-  })
-  return { items, readAt: await $.clock.now() }
+const TRACKER_DOC = 'docs/agents/issue-tracker.md'
+
+const repoKey = async ($: Engine): Promise<string> => {
+  try {
+    return (await $.session.repo())?.root ?? 'default'
+  } catch {
+    return 'default'
+  }
+}
+
+const overrideKey = async ($: Engine) => `backend:${await repoKey($)}`
+
+/** The person's override for this repo if there is one, else what the tracker doc names, else Markdown. */
+const resolveBackend = async ($: Engine): Promise<Backend> => {
+  try {
+    const stored = await $.store.get(await overrideKey($))
+    if (stored === 'github' || stored === 'markdown') return stored
+  } catch {
+    // No store: detection decides.
+  }
+  try {
+    return detectBackend(await $.fs.read(TRACKER_DOC)) ?? 'markdown'
+  } catch {
+    return 'markdown'
+  }
+}
+
+/** `$.process` cannot be passed as a value either. */
+const ghRun = ($: Engine): Run => argv => $.process.run(argv)
+
+/** Reads the tracker now; nothing is stored, so a render may call it. A `gh` failure becomes the snapshot's error. */
+const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> => {
+  try {
+    // `$.fs` cannot be passed as a value; each call is spelled out.
+    const items =
+      backend === 'github'
+        ? await readGithubItems(ghRun($))
+        : await readMarkdownItems({
+            read: path => $.fs.read(path),
+            list: path => $.fs.list(path),
+            exists: path => $.fs.exists(path),
+          })
+    return { items, readAt: await $.clock.now() }
+  } catch (error) {
+    if (error instanceof GhError) return { items: [], readAt: await $.clock.now(), error: error.message }
+    throw error
+  }
 }
 
 /** Re-reads the tracker into the session's snapshot, which the Pane draws from. */
 const refresh = async ($: Engine) => {
   try {
-    await $.state.set(SNAPSHOT, await readBoard($))
+    await $.state.set(SNAPSHOT, await readBoard($, await resolveBackend($)))
   } catch {
     // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
   }
@@ -64,8 +110,6 @@ const SORTS: [BoardSort, string][] = [
 
 const PANE = 'deck'
 const PANE_TITLE = 'Skills Deck'
-const TRACKER_DOC = 'docs/agents/issue-tracker.md'
-
 const KIND_NAMES: Record<Kind, string> = {
   map: 'Map',
   spec: 'Spec',
@@ -152,21 +196,31 @@ export const register: Register = on => {
       ) : null
     }
 
-    const postComment = async (path: string, comment: string) => {
+    const backend = await resolveBackend($)
+
+    const postComment = async (item: BoardItem, comment: string) => {
       if (comment.trim() === '') return
-      await $.fs.write(path, appendComment(await $.fs.read(path), comment, new Date(await $.clock.now())))
+      if (backend === 'github') {
+        try {
+          await postGithubComment(ghRun($), item.number ?? 0, comment)
+        } catch (error) {
+          if (!(error instanceof GhError)) throw error
+          await $.state.set(SNAPSHOT, { items: [], readAt: await $.clock.now(), error: error.message })
+          return
+        }
+      } else {
+        await $.fs.write(item.path, appendComment(await $.fs.read(item.path), comment, new Date(await $.clock.now())))
+      }
+      await refresh($)
+    }
+    const switchBackend = async (chosen: Backend) => {
+      await $.store.set(await overrideKey($), chosen)
+      await $.state.set(DETAIL, null)
       await refresh($)
     }
 
-    let backend: Backend = 'markdown'
-    try {
-      backend = detectBackend(await $.fs.read(TRACKER_DOC)) ?? backend
-    } catch {
-      // No tracker doc: the Markdown tracker is the default.
-    }
-
     // Drawing is pure: with no snapshot yet (the Pane opened without /deck) read live, store nothing.
-    const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($))
+    const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
     const { items } = snapshot
     const now = await $.clock.now()
 
@@ -199,14 +253,21 @@ export const register: Register = on => {
 
     const ticket = detailPath === null ? undefined : items.find(item => item.path === detailPath)
     if (ticket) {
-      let text = ''
-      let unreadable = false
+      let body = ''
+      let comments: string[] = []
+      let problem: string | null = null
+      let readOnly = false
       try {
-        text = await $.fs.read(ticket.path)
-      } catch {
-        unreadable = true
+        if (backend === 'github') {
+          ;({ body, comments } = await readGithubDetail(ghRun($), ticket.number ?? 0))
+          readOnly = !(await canWriteGithub(ghRun($)))
+        } else {
+          ;({ body, comments } = readTicketDetail(await $.fs.read(ticket.path)))
+        }
+      } catch (error) {
+        problem = error instanceof GhError ? error.message : 'Could not read this file.'
       }
-      const { body, comments } = readTicketDetail(text)
+      const unreadable = problem !== null
       const blockers = ticket.blockedBy.map(number => ({
         number,
         item: items.find(item => item.feature === ticket.feature && item.number === number),
@@ -218,7 +279,7 @@ export const register: Register = on => {
           <Text>{cardLine(ticket)}</Text>
           <Box>{renderAction(ticket, items)}</Box>
           {ticket.warning && <Text dimColor>{ticket.warning}</Text>}
-          {unreadable ? <Text dimColor>Could not read this file.</Text> : <Markdown text={body} />}
+          {unreadable ? <Text dimColor>{problem}</Text> : <Markdown text={body} />}
           <Text bold>Blocked by</Text>
           {blockers.length === 0 && <Text dimColor>None</Text>}
           {blockers.map(({ number, item }) =>
@@ -236,14 +297,15 @@ export const register: Register = on => {
           {comments.map((comment, index) => (
             <Markdown key={`comment:${index}`} text={comment} />
           ))}
-          {Input && backend === 'markdown' && !unreadable && (
+          {readOnly && <Text dimColor>You have read-only access to this repo, so comments are disabled.</Text>}
+          {Input && !unreadable && !readOnly && (
             <Input
               key="comment"
               label="Comment"
               placeholder="Write a comment"
               value=""
               submitLabel="post"
-              onSubmit={(value: string) => postComment(ticket.path, value)}
+              onSubmit={(value: string) => postComment(ticket, value)}
             />
           )}
         </Box>
@@ -289,7 +351,17 @@ export const register: Register = on => {
             />
           ))}
         </Box>
+        {snapshot.error && <Text>{snapshot.error}</Text>}
         <Text dimColor>Backend: {BACKEND_NAMES[backend]}</Text>
+        <Box>
+          {(Object.keys(BACKEND_NAMES) as Backend[]).map(name => (
+            <Button
+              key={`backend:${name}`}
+              label={marked(backend === name, BACKEND_NAMES[name])}
+              onPress={() => switchBackend(name)}
+            />
+          ))}
+        </Box>
         <Button key="health" label="Health check" onPress={() => fillPrompt($, HEALTH_CHECK_PROMPT)} />
         {visibleItems(items, derived, view).map(item => (
           <Box flexDirection="column">
@@ -300,9 +372,9 @@ export const register: Register = on => {
               <Button
                 key={`copy:${item.path}`}
                 label="Copy link"
-                onPress={press => $.ui.copy({ text: item.path, surface: press.surface })}
+                onPress={press => $.ui.copy({ text: item.url ?? item.path, surface: press.surface })}
               />
-              <Link href={item.path}>Open</Link>
+              <Link href={item.url ?? item.path}>Open</Link>
             </Box>
             {item.warning && <Text dimColor>{item.warning}</Text>}
           </Box>

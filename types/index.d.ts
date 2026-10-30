@@ -35,6 +35,8 @@ export type BoardItem = {
   parent: string | null
   /** Set when the file did not parse and was kept as a plain Ticket. */
   warning?: string
+  /** Web address of the ticket, when the Backend has one (GitHub). */
+  url?: string
 }
 
 export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'claimable'
@@ -44,7 +46,12 @@ export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 export type BoardView = { filter: BoardFilter; sort: BoardSort; chips: string[] }
 
 /** The Board as last read from the tracker; the Pane (and later the Capsule band) read this one copy. */
-export type BoardSnapshot = { items: BoardItem[]; readAt: number }
+export type BoardSnapshot = {
+  items: BoardItem[]
+  readAt: number
+  /** Why the tracker could not be read (a `gh` failure); the Pane shows it. */
+  error?: string
+}
 
 declare module 'claude-code' {
   interface PluginState {

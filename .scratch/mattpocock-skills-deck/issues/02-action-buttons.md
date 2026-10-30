@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The ladder is one table; a table-driven test covers every row
-- [ ] Clicking an Action on an empty draft fills the box with the right prompt, naming the ticket
-- [ ] On a non-empty draft a confirm appears; cancelling keeps the draft
-- [ ] No Action ever submits the prompt
-- [ ] Health check fills its prompt
+- [x] The ladder is one table; a table-driven test covers every row
+- [x] Clicking an Action on an empty draft fills the box with the right prompt, naming the ticket
+- [x] On a non-empty draft a confirm appears; cancelling keeps the draft
+- [x] No Action ever submits the prompt
+- [x] Health check fills its prompt

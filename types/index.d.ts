@@ -19,15 +19,12 @@ export type BoardItem = {
   title: string
   /** Ticket number from the file name, or null for a Container. */
   number: number | null
+  /** The `.scratch/<feature>` folder the item lives in; ticket numbers are only unique within it. */
+  feature: string
   labels: string[]
   state: TicketState
   /** Repo-relative path of the file the item was read from. */
   path: string
   /** Set when the file did not parse and was kept as a plain Ticket. */
   warning?: string
-}
-
-export type Board = {
-  backend: Backend
-  items: BoardItem[]
 }

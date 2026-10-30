@@ -3,22 +3,23 @@ import type { BoardItem, Kind } from '../types'
 /** The slice of `$.fs` the Markdown tracker needs. */
 export type Fs = {
   read: (path: string) => Promise<string>
-  list: (path?: string) => Promise<{ name: string; kind: string }[]>
+  list: (path?: string) => Promise<{ name: string; kind: 'file' | 'dir' | 'other' }[]>
   exists: (path: string) => Promise<boolean>
 }
 
 const SCRATCH = '.scratch'
 const CLOSED_STATUSES = new Set(['resolved', 'wontfix'])
-const NON_LABEL_STATUSES = new Set(['claimed', 'resolved'])
+/** `Status: resolved` is the closed state itself, so it is not also a label. */
+const STATUS_SHOWN_AS_STATE = 'resolved'
+/** The kinds a `Type:` line or a `wayfinder:<kind>` label can name. */
 const TYPE_KINDS: Partial<Record<string, Kind>> = {
-  map: 'map',
-  spec: 'spec',
   research: 'research',
   prototype: 'prototype',
   grilling: 'grilling',
   task: 'task',
-  bug: 'bug',
 }
+
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)
 
 /** `Key: value` or `**Key:** value` lines; the first of each key wins. */
 const readFields = (text: string): Map<string, string> => {
@@ -45,36 +46,52 @@ const slugTitle = (fileName: string): string =>
     .replace(/^\d+-/, '')
     .replace(/-/g, ' ')
 
-const detectKind = (text: string, fields: Map<string, string>, labels: string[]): Kind => {
+const readNumber = (fileName: string): number | null => {
+  const digits = /^(\d+)-/.exec(fileName)?.[1]
+  return digits === undefined ? null : Number(digits)
+}
+
+/** Kind detection, in order: `Type:` line, `wayfinder:*` label, `bug` label, body shape, container file name, else plain. */
+const detectKind = (
+  text: string,
+  fields: Map<string, string>,
+  labels: string[],
+  fileName: string,
+): Kind => {
   const typed = TYPE_KINDS[(fields.get('type') ?? '').toLowerCase()]
   if (typed) return typed
 
   for (const label of labels) {
-    if (label.startsWith('wayfinder:')) {
-      const kind = TYPE_KINDS[label.slice('wayfinder:'.length)]
-      if (kind) return kind
-    }
-    if (label === 'bug') return 'bug'
+    const wayfinder = label.startsWith('wayfinder:')
+      ? TYPE_KINDS[label.slice('wayfinder:'.length)]
+      : undefined
+    if (wayfinder) return wayfinder
   }
+  if (labels.includes('bug')) return 'bug'
 
   if (/^## Fog\b/m.test(text) || /^## Decisions so far\b/im.test(text)) return 'map'
   if (/^## Problem Statement\b/m.test(text)) return 'spec'
   if (/what to build:?\**/i.test(text)) return 'implementation'
+
+  if (fileName === 'map.md') return 'map'
+  if (fileName === 'spec.md') return 'spec'
   return 'plain'
 }
 
 /** Parses one tracker file into a Board item; a file that does not parse becomes a plain Ticket with a warning. */
 export const parseItem = (path: string, text: string): BoardItem => {
-  const fileName = path.slice(path.lastIndexOf('/') + 1)
-  const number = /^(\d+)-/.exec(fileName)?.[1]
+  const [, feature = '', ...rest] = path.split('/')
+  const fileName = rest[rest.length - 1] ?? ''
+  const number = readNumber(fileName)
   const title = readTitle(text)
-  const isText = !text.includes('\u0000')
+  const hasNulByte = text.includes('\u0000')
 
-  if (title === null || !isText) {
+  if (title === null || hasNulByte) {
     return {
       kind: 'plain',
       title: slugTitle(fileName),
-      number: number === undefined ? null : Number(number),
+      number,
+      feature,
       labels: [],
       state: 'open',
       path,
@@ -88,31 +105,52 @@ export const parseItem = (path: string, text: string): BoardItem => {
     .split(',')
     .map(label => label.trim())
     .filter(Boolean)
-  if (status !== '' && !NON_LABEL_STATUSES.has(status)) labels.push(status)
-
-  let kind = detectKind(text, fields, labels)
-  if (kind === 'plain' && fileName === 'map.md') kind = 'map'
-  if (kind === 'plain' && fileName === 'spec.md') kind = 'spec'
+  if (status !== '' && status !== STATUS_SHOWN_AS_STATE) labels.push(status)
 
   return {
-    kind,
+    kind: detectKind(text, fields, labels, fileName),
     title,
-    number: number === undefined ? null : Number(number),
+    number,
+    feature,
     labels,
     state: CLOSED_STATUSES.has(status) ? 'closed' : 'open',
     path,
   }
 }
 
+/** A file or folder that could not be read is kept as a plain Ticket with a warning. */
+const unreadableItem = (path: string, feature: string): BoardItem => ({
+  ...parseItem(path, ''),
+  title: path,
+  feature,
+  warning: `Could not read ${path}, so it is shown as a plain Ticket.`,
+})
+
 const readItem = async (fs: Fs, path: string): Promise<BoardItem> => {
   try {
     return parseItem(path, await fs.read(path))
   } catch {
-    return {
-      ...parseItem(path, ''),
-      warning: 'Could not read this file, so it is shown as a plain Ticket.',
+    return unreadableItem(path, path.split('/')[1] ?? '')
+  }
+}
+
+const readFeature = async (fs: Fs, name: string): Promise<BoardItem[]> => {
+  const dir = `${SCRATCH}/${name}`
+  const items: BoardItem[] = []
+  let isContainer = false
+  for (const file of ['map.md', 'spec.md']) {
+    if (await fs.exists(`${dir}/${file}`)) {
+      isContainer = true
+      items.push(await readItem(fs, `${dir}/${file}`))
     }
   }
+  if (isContainer || !(await fs.exists(`${dir}/issues`))) return items
+
+  const files = (await fs.list(`${dir}/issues`)).filter(
+    entry => entry.kind === 'file' && entry.name.endsWith('.md'),
+  )
+  for (const file of files.sort(byName)) items.push(await readItem(fs, `${dir}/issues/${file.name}`))
+  return items
 }
 
 /** Every Map, Spec and standalone Ticket under `.scratch/`; children of a Container are left to its detail view. */
@@ -121,25 +159,12 @@ export const readMarkdownItems = async (fs: Fs): Promise<BoardItem[]> => {
 
   const items: BoardItem[] = []
   const features = (await fs.list(SCRATCH)).filter(entry => entry.kind === 'dir')
-  features.sort((a, b) => a.name.localeCompare(b.name))
-
-  for (const feature of features) {
-    const dir = `${SCRATCH}/${feature.name}`
-    let isContainer = false
-    for (const name of ['map.md', 'spec.md']) {
-      if (await fs.exists(`${dir}/${name}`)) {
-        isContainer = true
-        items.push(await readItem(fs, `${dir}/${name}`))
-      }
+  for (const feature of features.sort(byName)) {
+    try {
+      items.push(...(await readFeature(fs, feature.name)))
+    } catch {
+      items.push(unreadableItem(`${SCRATCH}/${feature.name}/issues`, feature.name))
     }
-    if (isContainer || !(await fs.exists(`${dir}/issues`))) continue
-
-    const files = (await fs.list(`${dir}/issues`)).filter(
-      entry => entry.kind === 'file' && entry.name.endsWith('.md'),
-    )
-    files.sort((a, b) => a.name.localeCompare(b.name))
-    for (const file of files) items.push(await readItem(fs, `${dir}/issues/${file.name}`))
   }
-
   return items
 }

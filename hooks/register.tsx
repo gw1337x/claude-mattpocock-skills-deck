@@ -11,7 +11,7 @@ const TRACKER_DOC = 'docs/agents/issue-tracker.md'
 const KIND_NAMES: Record<Kind, string> = {
   map: 'Map',
   spec: 'Spec',
-  implementation: 'Ticket',
+  implementation: 'Implementation',
   research: 'Research',
   prototype: 'Prototype',
   grilling: 'Grilling',
@@ -23,7 +23,7 @@ const KIND_NAMES: Record<Kind, string> = {
 const cardLine = (item: BoardItem): string =>
   [
     KIND_NAMES[item.kind],
-    item.number === null ? null : `#${item.number}`,
+    item.number === null ? null : `${item.feature} #${item.number}`,
     item.title,
     item.labels.join(', '),
     item.state,
@@ -66,6 +66,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
+        <Text bold>Board</Text>
         <Text dimColor>Backend: {BACKEND_NAMES[backend]}</Text>
         {items.map(item => (
           <Box flexDirection="column">

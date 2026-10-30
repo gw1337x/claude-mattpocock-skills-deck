@@ -72,6 +72,8 @@ declare module 'claude-code' {
       filled: { text: string; title: string | null } | null
       /** The title waiting for the turn to end, when the session may be renamed. */
       pendingTitle: string | null
+      /** True while the deck's own `/rename` runs. */
+      deckRenaming: boolean
       /** True once the person renamed the session themselves; the deck then never retitles it. */
       personTitled: boolean
     }

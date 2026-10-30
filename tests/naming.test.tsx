@@ -85,6 +85,22 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
+  test(`a later deck prompt replaces the deck's own title on ${surface}`, async ($, on) => {
+    serveFiles(on, MARKDOWN_TRACKER)
+    const log = serveSession(on)
+    const ui = await mountPane($)
+
+    await ui.press({ key: `action:${BUG}` })
+    await $.prompt.submit({ text: log.filled, wait: false, origin: COMPOSER })
+    await turnComplete($)
+    await ui.press({ key: `action:${BUG}` })
+    await $.prompt.submit({ text: log.filled, wait: false, origin: COMPOSER })
+    await turnComplete($)
+
+    expect(log.renames).toHaveLength(2)
+    await ui.unmount()
+  })
+
   test(`a title the person set is left alone on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveSession(on)

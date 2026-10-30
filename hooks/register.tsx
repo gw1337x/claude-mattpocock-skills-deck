@@ -33,6 +33,7 @@ type Engine = Parameters<Hook<'session.start'>>[0]
 
 const FILLED = { plugin: 'mattpocock-skills-deck', key: 'filled' } as const
 const PENDING_TITLE = { plugin: 'mattpocock-skills-deck', key: 'pendingTitle' } as const
+const DECK_RENAMING = { plugin: 'mattpocock-skills-deck', key: 'deckRenaming' } as const
 const PERSON_TITLED = { plugin: 'mattpocock-skills-deck', key: 'personTitled' } as const
 
 /** `title` is what the session is called once this prompt is sent; null marks a draft, undefined a prompt that never renames. */
@@ -68,7 +69,13 @@ const applyTitle = async ($: Engine) => {
   if (!title) return
   await $.state.set(PENDING_TITLE, null)
   if ((await $.state.get(PERSON_TITLED)).value) return
-  await $.command.run({ command: 'rename', args: title })
+  // The engine may route the deck's own rename back through the rename hook; the flag tells it apart from the person's.
+  await $.state.set(DECK_RENAMING, true)
+  try {
+    await $.command.run({ command: 'rename', args: title.replace(/\s+/g, ' ') })
+  } finally {
+    await $.state.set(DECK_RENAMING, false)
+  }
 }
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
@@ -320,9 +327,8 @@ export const register: Register = on => {
     return result
   })
 
-  on('command.run', { command: 'rename' }, async (_$, e, next) => {
-    // The deck's own rename never reaches this hook, so any rename seen here is somebody else's.
-    await _$.state.set(PERSON_TITLED, true)
+  on('command.run', { command: 'rename' }, async ($, e, next) => {
+    if (!(await $.state.get(DECK_RENAMING)).value) await $.state.set(PERSON_TITLED, true)
     return next(e)
   })
 

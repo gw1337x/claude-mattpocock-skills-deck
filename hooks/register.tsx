@@ -110,6 +110,7 @@ const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as con
 const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
+const BAND_COLLAPSED = { plugin: 'mattpocock-skills-deck', key: 'bandCollapsed' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
   try {
@@ -275,8 +276,6 @@ const recordTouch = async ($: Engine, call: Parameters<typeof touchOf>[0]) => {
   $.ui.invalidate('ui.render')
 }
 
-const marked = (active: boolean, label: string) => (active ? `[${label}]` : label)
-
 const freshness = (readAt: number, now: number): string => {
   const minutes = Math.floor(Math.max(0, now - readAt) / 60_000)
   return minutes < 1 ? 'Updated just now' : `Updated ${minutes} min ago`
@@ -412,78 +411,148 @@ export const register: Register = on => {
     const loaded = menuOpen ? await loadedSkills($) : []
     const installed = installedMattSkills(loaded ?? [])
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
+    const collapsed = (await $.state.get(BAND_COLLAPSED)).value ?? false
     const now = await $.clock.now()
     const entries = await readRoute($)
     const session = await sessionId($)
     const mine = ownRoute(entries, session, now)
     const others = othersLine(entries, session, now)
     const latest = mine[0]
+    // Only a score the Env Check already worked out; the band never runs the checks itself.
+    const envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
+    const env = envChecks === null ? null : scoreOf(envChecks)
+
+    /** One control of the status bar: an icon and a word in its colour, named by `label`. */
+    const item = (key: string, label: string, text: string, color: string | undefined, onPress: () => unknown, chosen = false) => (
+      <Button key={key} label={label} plain variant={chosen ? 'primary' : undefined} onPress={onPress}>
+        <Text color={color} weight="medium">
+          {text}
+        </Text>
+      </Button>
+    )
+    const divider = <Text dimColor>│</Text>
 
     return (
-      <Box flexDirection="column" flexShrink={0} marginTop={1}>
-        <Box flexDirection="row" flexWrap="wrap">
-          <Button
-            key="count:claimable"
-            label={`Claimable ${claimable}`}
-            onPress={() => openBoard($, { filter: 'claimable', chips: [] })}
-          />
-          <Button
-            key="count:blocked"
-            label={`Blocked ${blocked}`}
-            onPress={() => openBoard($, { filter: 'blocked', chips: [] })}
-          />
-          <Button
-            key="count:needs-triage"
-            label={`Needs-triage ${needsTriage}`}
-            onPress={() => openBoard($, { filter: 'open', chips: ['needs-triage'] })}
-          />
-          <Button key="new" label="New" onPress={() => startNew($)} />
-          <Button key="bug" label="+Bug" onPress={() => startBug($)} />
-          <Button key="handoff" label="Handoff" onPress={() => fillPrompt($, HANDOFF_PROMPT)} />
-          <Button key="continue" label="Continue" onPress={() => fillPrompt($, CONTINUE_PROMPT)} />
-          <Button key="fixate" label="Fixate" onPress={() => fillPrompt($, FIXATE_PROMPT)} />
-          <Button
-            key="skills-menu"
-            label={marked(menuOpen, 'Skills')}
-            onPress={() => $.state.set(SKILLS_MENU, !menuOpen)}
-          />
-          <Button
-            key="route"
-            label={marked(routeOpen, latest ? `Work Route #${latest.ticket}` : 'Work Route')}
-            onPress={() => $.state.set(ROUTE_OPEN, !routeOpen)}
-          />
-        </Box>
+      <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
         {routeOpen && (
-          <Box flexDirection="column">
+          <Box key="route-panel" flexDirection="column" borderStyle="round" borderColor="#30363d" padding="sm" rowGap="xs">
+            <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap="md">
+              <Box flexDirection="row" columnGap="sm">
+                <Text weight="semibold">Work Route</Text>
+                <Text dimColor size="footnote">{`this session · ${mine.length}`}</Text>
+              </Box>
+              {others && (
+                <Text dimColor size="footnote">
+                  {others}
+                </Text>
+              )}
+            </Box>
             {mine.length === 0 && <Text dimColor>No Tickets touched in this session yet.</Text>}
             {mine.map((entry, index) => (
               <Button
                 key={`route:${index}`}
                 label={`#${entry.ticket} ${entry.title} · ${entry.action} · ${ago(entry.time, now)}`}
+                plain
                 onPress={async () => {
                   if (entry.path === null) return
                   await $.state.set(TAB, 'board')
                   await $.state.set(DETAIL, entry.path)
                   await $.ui.open({ id: PANE, title: PANE_TITLE })
                 }}
-              />
+              >
+                <Text color="#58a6ff" mono weight="semibold">{`#${entry.ticket} `}</Text>
+                <Text>{`${entry.title} `}</Text>
+                <Text backgroundColor="#30363d" color="#c9d1d9" size="footnote">{` ${entry.action} `}</Text>
+                <Text dimColor size="footnote">{`  ${ago(entry.time, now)}`}</Text>
+              </Button>
             ))}
-            {others && <Text>{others}</Text>}
           </Box>
         )}
         {menuOpen && (
-          <Box flexDirection="row" flexWrap="wrap">
-            {loaded === null && <Text>Could not read the installed skills.</Text>}
-            {loaded !== null && installed.size === 0 && <Text dimColor>No Matt skills installed.</Text>}
-            {CATALOGUE.filter(skill => installed.has(skill.name)).map(skill => (
-              <Button
-                key={`band-skill:${skill.name}`}
-                label={`/${skill.name}`}
-                onPress={() => fillPrompt($, `/${skill.name}`)}
-              />
-            ))}
+          <Box key="skills-panel" flexDirection="column" borderStyle="round" borderColor="#30363d" padding="sm" rowGap="xs">
+            <Text weight="semibold">Matt skills</Text>
+            <Box flexDirection="row" flexWrap="wrap" columnGap="xs" rowGap="xs">
+              {loaded === null && <Text>Could not read the installed skills.</Text>}
+              {loaded !== null && installed.size === 0 && <Text dimColor>No Matt skills installed.</Text>}
+              {CATALOGUE.filter(skill => installed.has(skill.name)).map(skill => (
+                <Button key={`band-skill:${skill.name}`} label={`/${skill.name}`} onPress={() => fillPrompt($, `/${skill.name}`)}>
+                  <Text mono>{`/${skill.name}`}</Text>
+                </Button>
+              ))}
+            </Box>
           </Box>
         )}
+        <Box
+          key="status-bar"
+          flexDirection="row"
+          justifyContent="space-between"
+          alignItems="center"
+          flexWrap="wrap"
+          columnGap="md"
+          rowGap="xs"
+          borderStyle="round"
+          borderColor="#30363d"
+          paddingX="sm"
+        >
+          <Box flexDirection="row" alignItems="center" flexWrap="wrap" columnGap="md" rowGap="xs">
+            {item('open-deck', 'Skills Deck', '◉ MattSkills', undefined, () => openBoard($, { filter: 'all', chips: [] }))}
+            {item(
+              'route',
+              latest ? `Work Route #${latest.ticket}` : 'Work Route',
+              latest ? `⌖ #${latest.ticket}` : '⌖ Route',
+              '#58a6ff',
+              () => $.state.set(ROUTE_OPEN, !routeOpen),
+              routeOpen,
+            )}
+            {item(
+              'count:claimable',
+              `Claimable ${claimable}`,
+              `${STATUS_STYLES.claimable.icon} Claimable ${claimable}`,
+              STATUS_STYLES.claimable.color,
+              () => openBoard($, { filter: 'claimable', chips: [] }),
+            )}
+            {item(
+              'count:blocked',
+              `Blocked ${blocked}`,
+              `${STATUS_STYLES.blocked.icon} Blocked ${blocked}`,
+              STATUS_STYLES.blocked.color,
+              () => openBoard($, { filter: 'blocked', chips: [] }),
+            )}
+            {item('count:needs-triage', `Needs-triage ${needsTriage}`, `✎ Triage ${needsTriage}`, '#d29922', () =>
+              openBoard($, { filter: 'open', chips: ['needs-triage'] }),
+            )}
+            {!collapsed && divider}
+            {!collapsed && item('new', 'New', '◈ New', KIND_STYLES.map.color, () => startNew($))}
+            {!collapsed && item('bug', '+Bug', '✱ +Bug', KIND_STYLES.bug.color, () => startBug($))}
+            {!collapsed && item('fixate', 'Fixate', '▤ Fixate', '#d2a8ff', () => fillPrompt($, FIXATE_PROMPT))}
+            {!collapsed && item('handoff', 'Handoff', '⇆ Handoff', '#58a6ff', () => fillPrompt($, HANDOFF_PROMPT))}
+            {!collapsed && item('continue', 'Continue', '↪ Continue', '#58a6ff', () => fillPrompt($, CONTINUE_PROMPT))}
+            {!collapsed &&
+              env !== null &&
+              item(
+                'env',
+                `Env ${env.passed}/${env.total}`,
+                `${env.passed === env.total ? '✓' : '⚠'} Env ${env.passed}/${env.total}`,
+                env.passed === env.total ? STATUS_STYLES.claimable.color : '#d29922',
+                async () => {
+                  await $.state.set(TAB, 'env')
+                  await $.state.set(DETAIL, null)
+                  await $.ui.open({ id: PANE, title: PANE_TITLE })
+                },
+              )}
+          </Box>
+          <Box flexDirection="row" alignItems="center" columnGap="sm">
+            {!collapsed && (
+              <Text dimColor size="footnote">
+                {`↻ ${freshness(snapshot.readAt, now)}`}
+              </Text>
+            )}
+            {!collapsed && item('skills-menu', 'Skills', '⊞', undefined, () => $.state.set(SKILLS_MENU, !menuOpen), menuOpen)}
+            {item('band-collapse', collapsed ? 'Expand' : 'Collapse', collapsed ? '⌃' : '⌄', undefined, () =>
+              $.state.set(BAND_COLLAPSED, !collapsed),
+            )}
+          </Box>
+        </Box>
       </Box>
     )
   })

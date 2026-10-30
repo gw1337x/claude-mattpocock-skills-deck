@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
+import { buttonLabels, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const BAND = {
@@ -87,15 +88,15 @@ for (const surface of SURFACES) {
     const { opened } = serveSession(on, held)
     await clock.set(1_000)
     const band = await mountBand($, surface)
-    expect(await everything(band)).toContain('Work Route')
+    expect(await buttonLabels(band)).toContain('Work Route')
 
     await $.tool.call({ tool: 'Bash', command: 'gh issue comment 12' })
     await clock.advance(5 * 60_000)
     await $.tool.call({ tool: 'Write', file_path: '.scratch/checkout-ux/issues/02-prototype-form.md', content: 'x' })
 
-    expect(await everything(band)).toContain('Work Route #2')
+    expect(await buttonLabels(band)).toContain('Work Route #2')
     await band.press({ key: 'route' })
-    const shown = await everything(band)
+    const shown = await buttonLabels(band)
     const first = shown.findIndex(t => t.startsWith('#2 Prototype the card form'))
     const second = shown.findIndex(t => t.startsWith('#12'))
     expect(first).toBeGreaterThanOrEqual(0)
@@ -147,7 +148,7 @@ for (const surface of SURFACES) {
     const shown = await everything(band)
     expect(shown.some(t => /other session/.test(t))).toBe(false)
     expect(shown.some(t => t.startsWith('#8 '))).toBe(false)
-    expect(shown).toContain('[Work Route]')
+    expect(await isOn(band, 'route')).toBe(true)
 
     await $.tool.call({ tool: 'Bash', command: 'gh issue view 3' })
     const tickets = (held[STORE_KEY] as { ticket: number }[]).map(r => r.ticket)

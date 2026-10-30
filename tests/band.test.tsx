@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { boardCounts, buttonLabels, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -108,7 +108,7 @@ for (const surface of SURFACES) {
     const pane = await mountPane($, surface)
 
     expect(await boardCounts(pane)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
-    const shown = await everything(band)
+    const shown = await buttonLabels(band)
     expect(shown).toContain('Claimable 3')
     expect(shown).toContain('Blocked 1')
     expect(shown).toContain('Needs-triage 2')

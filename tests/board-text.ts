@@ -54,3 +54,7 @@ export const boardCounts = async (ui: object) => {
 /** True when the Button keyed `key` is drawn as the chosen one. */
 export const isOn = async (ui: object, key: string): Promise<boolean> =>
   (await asDrawn(ui).findAll({ type: 'Button', key })).some(button => button.props.variant === 'primary')
+
+/** What each Button is named, whatever icon text it draws. */
+export const buttonLabels = async (ui: object): Promise<string[]> =>
+  (await asDrawn(ui).findAll({ type: 'Button' })).map(button => String(button.props.label ?? ''))

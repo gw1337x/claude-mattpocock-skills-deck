@@ -83,6 +83,8 @@ declare module 'claude-code' {
       skillsMenu: boolean
       /** True while the Capsule band's Work Route list is open. */
       routeOpen: boolean
+      /** True while the Capsule band shows only its counts. */
+      bandCollapsed: boolean
       /** The prompt the deck last filled and the title it would give the session; a null title is a draft. */
       filled: { text: string; title: string | null } | null
       /** The title waiting for the turn to end, when the session may be renamed. */

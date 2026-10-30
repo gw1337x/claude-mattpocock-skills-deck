@@ -1,7 +1,9 @@
 import type { On } from 'claude-code'
+import { mock } from 'claude-code/testing'
 
 /**
- * Answers `$.fs` from a fixture tree, the way the engine would. The engine
+ * Answers `$.clock` from a clock that only the test moves (returned), and
+ * `$.fs` from a fixture tree, the way the engine would. The engine
  * resolves paths against the working directory, so a path arrives absolute;
  * `relative` maps it back to the fixture's repo-relative key.
  */
@@ -12,7 +14,19 @@ export const serveFiles = (
   unreadable?: string,
   /** Modified times by repo-relative file path; files not named here report 0. */
   mtimes: Record<string, number> = {},
+  /** When given, the clock is a plain one that records each timer asked of it here. */
+  timers?: string[],
 ) => {
+  const clock = timers ? undefined : mock.clock(on)
+  if (timers) {
+    on('clock.now', () => ({ value: 0 }))
+    for (const kind of ['sleep', 'after', 'every'] as const) {
+      on(`clock.${kind}`, () => {
+        timers.push(kind)
+        return { value: undefined }
+      })
+    }
+  }
   const keys = Object.keys(files)
   const isFile = (path: string) => path in files
   const isDir = (path: string) => keys.some(key => key.startsWith(`${path}/`))
@@ -58,4 +72,5 @@ export const serveFiles = (
       })),
     }
   })
+  return clock!
 }

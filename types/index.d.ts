@@ -43,8 +43,11 @@ export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 /** What the person has chosen on the Board; kept in session state. */
 export type BoardView = { filter: BoardFilter; sort: BoardSort; chips: string[] }
 
+/** The Board as last read from the tracker; the Pane (and later the Capsule band) read this one copy. */
+export type BoardSnapshot = { items: BoardItem[]; readAt: number }
+
 declare module 'claude-code' {
   interface PluginState {
-    'mattpocock-skills-deck': { boardView: BoardView }
+    'mattpocock-skills-deck': { boardView: BoardView; snapshot: BoardSnapshot }
   }
 }

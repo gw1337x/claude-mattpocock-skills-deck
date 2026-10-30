@@ -94,6 +94,7 @@ for (const surface of SURFACES) {
 
   test(`/deck opens the Pane on ${surface}`, async ($, on) => {
     const opened: string[] = []
+    serveFiles(on, MARKDOWN_TRACKER)
     on('command.register', () => ({ value: { command: 'deck' } }))
     on('ui.open', (_, e) => {
       opened.push(e.id)

@@ -1,6 +1,6 @@
 import type { Hook, Register } from 'claude-code'
 
-import type { Backend, BoardFilter, BoardItem, BoardSort, BoardView, Kind } from '../types'
+import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView, Kind } from '../types'
 import { actionFor, HEALTH_CHECK_PROMPT } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
@@ -19,6 +19,32 @@ const fillPrompt = async ($: Engine, text: string) => {
 }
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
+const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
+
+/** Reads the tracker now; nothing is stored, so a render may call it. */
+const readBoard = async ($: Engine): Promise<BoardSnapshot> => {
+  // `$.fs` cannot be passed as a value; each call is spelled out.
+  const items = await readMarkdownItems({
+    read: path => $.fs.read(path),
+    list: path => $.fs.list(path),
+    exists: path => $.fs.exists(path),
+  })
+  return { items, readAt: await $.clock.now() }
+}
+
+/** Re-reads the tracker into the session's snapshot, which the Pane draws from. */
+const refresh = async ($: Engine) => {
+  try {
+    await $.state.set(SNAPSHOT, await readBoard($))
+  } catch {
+    // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
+  }
+}
+
+const freshness = (readAt: number, now: number): string => {
+  const minutes = Math.floor(Math.max(0, now - readAt) / 60_000)
+  return minutes < 1 ? 'Updated just now' : `Updated ${minutes} min ago`
+}
 
 const FILTERS: [BoardFilter, string][] = [
   ['all', 'All'],
@@ -71,7 +97,14 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('turn.complete', async ($, e, next) => {
+    await refresh($)
+
+    return next(e)
+  })
+
   on('command.run', { command: 'deck' }, async $ => {
+    await refresh($)
     await $.ui.open({ id: PANE, title: PANE_TITLE })
 
     return { text: 'Skills Deck opened.' }
@@ -105,12 +138,10 @@ export const register: Register = on => {
       // No tracker doc: the Markdown tracker is the default.
     }
 
-    // `$.fs` cannot be passed as a value; each call is spelled out.
-    const items = await readMarkdownItems({
-      read: path => $.fs.read(path),
-      list: path => $.fs.list(path),
-      exists: path => $.fs.exists(path),
-    })
+    // Drawing is pure: with no snapshot yet (the Pane opened without /deck) read live, store nothing.
+    const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($))
+    const { items } = snapshot
+    const now = await $.clock.now()
 
     const derived = derive(items)
     const { claimable, blocked, closed } = derived.counts
@@ -119,6 +150,10 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text bold>Board</Text>
+        <Box>
+          <Text dimColor>{freshness(snapshot.readAt, now)}</Text>
+          <Button key="refresh" label="Refresh" onPress={() => refresh($)} />
+        </Box>
         <Text>{`Claimable ${claimable} · Blocked ${blocked} · Closed ${closed}`}</Text>
         <Box>
           {FILTERS.map(([filter, label]) => (

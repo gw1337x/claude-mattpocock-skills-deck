@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] Submitting a filled Action prompt sets the `[#n]` title
-- [ ] Submitting a New prompt sets the `[Draft]` title
-- [ ] A title the person set is left alone
-- [ ] A prompt the deck did not fill (or one heavily rewritten) does not rename the session
+- [x] Submitting a filled Action prompt sets the `[#n]` title
+- [x] Submitting a New prompt sets the `[Draft]` title
+- [x] A title the person set is left alone
+- [x] A prompt the deck did not fill (or one heavily rewritten) does not rename the session

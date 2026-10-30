@@ -31,13 +31,44 @@ import { ago, itemFor, othersLine, ownRoute, prune, touchOf, type RouteEntry } f
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
 type Engine = Parameters<Hook<'session.start'>>[0]
 
-const fillPrompt = async ($: Engine, text: string) => {
+const FILLED = { plugin: 'mattpocock-skills-deck', key: 'filled' } as const
+const PENDING_TITLE = { plugin: 'mattpocock-skills-deck', key: 'pendingTitle' } as const
+const PERSON_TITLED = { plugin: 'mattpocock-skills-deck', key: 'personTitled' } as const
+
+/** `title` is what the session is called once this prompt is sent; null marks a draft, undefined a prompt that never renames. */
+const fillPrompt = async ($: Engine, text: string, title?: string | null) => {
   const draft = await $.prompt.read()
   if (draft.text.trim() !== '') {
     const answer = await $.ui.ask('Replace your draft with this prompt?', ['Replace', 'Keep'])
     if (answer !== 'Replace') return
   }
-  await $.prompt.fill({ text, mode: 'replace' })
+  const { isFilled } = await $.prompt.fill({ text, mode: 'replace' })
+  await $.state.set(FILLED, isFilled && title !== undefined ? { text, title } : null)
+}
+
+/** The first line of a prompt: the slash command and the ticket it names. */
+const headOf = (text: string) => text.split(/\r?\n/)[0]?.trim() ?? ''
+
+const DRAFT_WORDS = 5
+const draftTitle = (text: string) =>
+  `[Draft] ${text.split(/\r?\n/).slice(1).join(' ').split(/\s+/).filter(Boolean).slice(0, DRAFT_WORDS).join(' ')}`.trim()
+
+/** Holds the title for a prompt the deck filled and the person sent on, to apply once the turn is done. */
+const holdTitle = async ($: Engine, sent: string) => {
+  const filled = (await $.state.get(FILLED)).value
+  if (!filled) return
+  await $.state.set(FILLED, null)
+  if (headOf(sent) !== headOf(filled.text)) return
+  await $.state.set(PENDING_TITLE, filled.title ?? draftTitle(sent))
+}
+
+/** Renames the session to the held title unless the person has named it; `/rename` cannot run inside the submit hook. */
+const applyTitle = async ($: Engine) => {
+  const title = (await $.state.get(PENDING_TITLE)).value
+  if (!title) return
+  await $.state.set(PENDING_TITLE, null)
+  if ((await $.state.get(PERSON_TITLED)).value) return
+  await $.command.run({ command: 'rename', args: title })
 }
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
@@ -210,7 +241,7 @@ const NEW_PROMPTS = { Map: NEW_MAP_PROMPT, Spec: NEW_SPEC_PROMPT } as const
 const startNew = async ($: Engine): Promise<boolean> => {
   const answer = await $.ui.ask('What are you starting?', ['Map', 'Spec'])
   if (answer !== 'Map' && answer !== 'Spec') return false
-  await fillPrompt($, NEW_PROMPTS[answer])
+  await fillPrompt($, NEW_PROMPTS[answer], null)
   return true
 }
 
@@ -235,6 +266,10 @@ const KIND_NAMES: Record<Kind, string> = {
   bug: 'Bug',
   plain: 'Ticket',
 }
+
+/** What a session working this item is called: its number, or its kind for a Container, then its title. */
+const titleFor = (item: BoardItem): string =>
+  `[${item.number === null ? KIND_NAMES[item.kind] : `#${item.number}`}] ${item.title}`
 
 const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
@@ -279,8 +314,25 @@ export const register: Register = on => {
     return result
   })
 
+  on('prompt.submit', async ($, e, next) => {
+    const result = await next(e)
+    if (result.text !== undefined && !e.command && e.origin.kind === 'composer') await holdTitle($, result.text)
+    return result
+  })
+
+  on('command.run', { command: 'rename' }, async (_$, e, next) => {
+    // The deck's own rename never reaches this hook, so any rename seen here is somebody else's.
+    await _$.state.set(PERSON_TITLED, true)
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     await refresh($)
+    try {
+      await applyTitle($)
+    } catch {
+      // A failed rename must not block the turn.
+    }
 
     return next(e)
   })
@@ -411,7 +463,7 @@ export const register: Register = on => {
     const renderAction = (item: BoardItem, all: BoardItem[]) => {
       const action = actionOf(item, all)
       return action ? (
-        <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt)} />
+        <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt, titleFor(item))} />
       ) : null
     }
 

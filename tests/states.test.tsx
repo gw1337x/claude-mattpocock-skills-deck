@@ -44,7 +44,7 @@ for (const surface of SURFACES) {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
-    expect(await texts(ui)).toContain('Claimable 4 · Blocked 1 · Closed 1')
+    expect(await texts(ui)).toContain('Claimable 3 · Blocked 1 · Closed 1')
     await ui.unmount()
   })
 
@@ -79,13 +79,13 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`the Claimable filter leaves out claimed, blocked and closed tickets on ${surface}`, async ($, on) => {
+  test(`the Claimable filter leaves out claimed, blocked, closed and unreadable tickets on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
     await ui.press({ key: 'filter:claimable' })
 
-    expect(new Set(await shown(ui))).toEqual(new Set(['Login crashes', 'garbled', 'card form']))
+    expect(new Set(await shown(ui))).toEqual(new Set(['Login crashes', 'card form']))
     await ui.unmount()
   })
 
@@ -96,6 +96,8 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'filter:closed' })
     expect(await shown(ui)).toEqual([])
     expect(await texts(ui)).toContainEqual(expect.stringMatching(/Done thing.*closed/))
+    // A closed child of a Map is listed too, as the Closed count includes it.
+    expect(await texts(ui)).toContainEqual(expect.stringMatching(/Research payment providers.*closed/))
 
     await ui.press({ key: 'filter:open' })
     expect(await texts(ui)).not.toContainEqual(expect.stringMatching(/Done thing/))

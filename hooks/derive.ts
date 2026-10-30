@@ -27,6 +27,8 @@ export const derive = (items: BoardItem[]): Derived => {
       closed += 1
       continue
     }
+    // A file that did not parse says nothing reliable about blockers or claims.
+    if (ticket.warning !== undefined) continue
     const waits = ticket.blockedBy.some(number => {
       const blocker = byRef.get(`${ticket.feature}/${number}`)
       return blocker === undefined || blocker.state === 'open'
@@ -46,7 +48,7 @@ const SORTS: Record<BoardSort, (a: BoardItem, b: BoardItem) => number> = {
   title: (a, b) => a.title.localeCompare(b.title),
 }
 
-/** Blocked and Claimable list matching Tickets wherever they live; the rest list the Board's top level. */
+/** Every filter but All looks through Containers into their children, so the list matches the counts. */
 const inFilter = (filter: BoardFilter, item: BoardItem, derived: Derived): boolean => {
   switch (filter) {
     case 'blocked':
@@ -54,9 +56,9 @@ const inFilter = (filter: BoardFilter, item: BoardItem, derived: Derived): boole
     case 'claimable':
       return derived.claimable.has(item.path)
     case 'open':
-      return item.parent === null && item.state === 'open'
+      return item.state === 'open'
     case 'closed':
-      return item.parent === null && item.state === 'closed'
+      return item.state === 'closed'
     case 'all':
       return item.parent === null
   }

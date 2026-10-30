@@ -5,7 +5,7 @@ A Claude Code mod that shows your project's issue tracker, as shaped by the [mat
 ## Install
 
 ```bash
-claude plugin marketplace add gw1337x/skillsdeck
+claude plugin marketplace add gw1337x/claude-mattpocock-skills-deck
 claude plugin install mattpocock-skills-deck@skillsdeck
 ```
 

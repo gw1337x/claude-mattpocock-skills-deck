@@ -10,6 +10,8 @@ export const serveFiles = (
   files: Record<string, string>,
   /** A folder whose listing fails, as an unreadable directory would. */
   unreadable?: string,
+  /** Modified times by repo-relative file path; files not named here report 0. */
+  mtimes: Record<string, number> = {},
 ) => {
   const keys = Object.keys(files)
   const isFile = (path: string) => path in files
@@ -39,17 +41,19 @@ export const serveFiles = (
     const dir = relative(e.path) ?? ''
     const prefix = dir === '' ? '' : `${dir}/`
     const names = new Map<string, 'file' | 'dir'>()
+    const modified = new Map<string, number>()
     for (const key of keys) {
       if (!key.startsWith(prefix)) continue
       const [head = '', ...rest] = key.slice(prefix.length).split('/')
       names.set(head, rest.length > 0 ? 'dir' : 'file')
+      if (rest.length === 0) modified.set(head, mtimes[key] ?? 0)
     }
     return {
       value: [...names].map(([name, kind]) => ({
         name,
         kind,
         size: 0,
-        mtimeMs: 0,
+        mtimeMs: modified.get(name) ?? 0,
         isLink: false,
       })),
     }

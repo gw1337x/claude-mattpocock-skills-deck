@@ -3,7 +3,7 @@ import type { BoardItem, Kind } from '../types'
 /** The slice of `$.fs` the Markdown tracker needs. */
 export type Fs = {
   read: (path: string) => Promise<string>
-  list: (path?: string) => Promise<{ name: string; kind: 'file' | 'dir' | 'other' }[]>
+  list: (path?: string) => Promise<{ name: string; kind: 'file' | 'dir' | 'other'; mtimeMs?: number }[]>
   exists: (path: string) => Promise<boolean>
 }
 
@@ -95,6 +95,10 @@ export const parseItem = (path: string, text: string): BoardItem => {
       labels: [],
       state: 'open',
       path,
+      blockedBy: [],
+      claimed: false,
+      updated: 0,
+      parent: null,
       warning: 'Could not read this file as a ticket, so it is shown as a plain Ticket.',
     }
   }
@@ -115,6 +119,10 @@ export const parseItem = (path: string, text: string): BoardItem => {
     labels,
     state: CLOSED_STATUSES.has(status) ? 'closed' : 'open',
     path,
+    blockedBy: (fields.get('blocked by') ?? '').match(/\d+/g)?.map(Number) ?? [],
+    claimed: status === 'claimed',
+    updated: 0,
+    parent: null,
   }
 }
 
@@ -126,34 +134,45 @@ const unreadableItem = (path: string, feature: string): BoardItem => ({
   warning: `Could not read ${path}, so it is shown as a plain Ticket.`,
 })
 
-const readItem = async (fs: Fs, path: string): Promise<BoardItem> => {
+const readItem = async (
+  fs: Fs,
+  path: string,
+  updated: number,
+  parent: string | null,
+): Promise<BoardItem> => {
   try {
-    return parseItem(path, await fs.read(path))
+    return { ...parseItem(path, await fs.read(path)), updated, parent }
   } catch {
-    return unreadableItem(path, path.split('/')[1] ?? '')
+    return { ...unreadableItem(path, path.split('/')[1] ?? ''), updated, parent }
   }
 }
 
 const readFeature = async (fs: Fs, name: string): Promise<BoardItem[]> => {
   const dir = `${SCRATCH}/${name}`
   const items: BoardItem[] = []
-  let isContainer = false
+  const entries = await fs.list(dir)
+  const modified = (file: string) => entries.find(entry => entry.name === file)?.mtimeMs ?? 0
+
+  let container: string | null = null
   for (const file of ['map.md', 'spec.md']) {
     if (await fs.exists(`${dir}/${file}`)) {
-      isContainer = true
-      items.push(await readItem(fs, `${dir}/${file}`))
+      const path = `${dir}/${file}`
+      container ??= path
+      items.push(await readItem(fs, path, modified(file), null))
     }
   }
-  if (isContainer || !(await fs.exists(`${dir}/issues`))) return items
+  if (!(await fs.exists(`${dir}/issues`))) return items
 
   const files = (await fs.list(`${dir}/issues`)).filter(
     entry => entry.kind === 'file' && entry.name.endsWith('.md'),
   )
-  for (const file of files.sort(byName)) items.push(await readItem(fs, `${dir}/issues/${file.name}`))
+  for (const file of files.sort(byName)) {
+    items.push(await readItem(fs, `${dir}/issues/${file.name}`, file.mtimeMs ?? 0, container))
+  }
   return items
 }
 
-/** Every Map, Spec and standalone Ticket under `.scratch/`; children of a Container are left to its detail view. */
+/** Every Map, Spec and Ticket under `.scratch/`; a Container's children carry its path as `parent`. */
 export const readMarkdownItems = async (fs: Fs): Promise<BoardItem[]> => {
   if (!(await fs.exists(SCRATCH))) return []
 

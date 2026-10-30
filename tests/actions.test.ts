@@ -11,6 +11,10 @@ const item = (over: Partial<BoardItem>): BoardItem => ({
   labels: [],
   state: 'open',
   path: '.scratch/f/issues/01-something.md',
+  blockedBy: [],
+  claimed: false,
+  updated: 0,
+  parent: null,
   ...over,
 })
 

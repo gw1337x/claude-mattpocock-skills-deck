@@ -6,6 +6,6 @@
 
 **Status:** ready-for-agent
 
-- [ ] Fixture counts match hand-computed Blocked / Claimable / closed numbers
-- [ ] A ticket blocked by a missing ticket counts as Blocked
-- [ ] Each filter, sort and label chip changes the visible cards as expected
+- [x] Fixture counts match hand-computed Blocked / Claimable / closed numbers
+- [x] A ticket blocked by a missing ticket counts as Blocked
+- [x] Each filter, sort and label chip changes the visible cards as expected

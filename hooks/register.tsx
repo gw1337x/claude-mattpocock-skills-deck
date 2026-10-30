@@ -1,7 +1,18 @@
 import type { Hook, Register } from 'claude-code'
 
 import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView, Kind } from '../types'
-import { actionFor, containerAction, HEALTH_CHECK_PROMPT, progressOf } from './actions'
+import {
+  actionFor,
+  BUG_PROMPT,
+  CONTINUE_PROMPT,
+  containerAction,
+  FIXATE_PROMPT,
+  HANDOFF_PROMPT,
+  HEALTH_CHECK_PROMPT,
+  NEW_MAP_PROMPT,
+  NEW_SPEC_PROMPT,
+  progressOf,
+} from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
 import {
@@ -33,6 +44,7 @@ const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
 const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
+const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 
 const TRACKER_DOC = 'docs/agents/issue-tracker.md'
 
@@ -150,6 +162,27 @@ const SORTS: [BoardSort, string][] = [
 
 const PANE = 'deck'
 const PANE_TITLE = 'Skills Deck'
+
+const NEW_PROMPTS = { Map: NEW_MAP_PROMPT, Spec: NEW_SPEC_PROMPT } as const
+
+/** The New flow: ask Map or Spec, then fill the matching prompt. Returns false if the question is dismissed. */
+const startNew = async ($: Engine): Promise<boolean> => {
+  const answer = await $.ui.ask('What are you starting?', ['Map', 'Spec'])
+  if (answer !== 'Map' && answer !== 'Spec') return false
+  await fillPrompt($, NEW_PROMPTS[answer])
+  return true
+}
+
+const startBug = ($: Engine) => fillPrompt($, BUG_PROMPT)
+
+/** Shows the Board in the Pane with the view the person asked for. */
+const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) => {
+  const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
+  await $.state.set(BOARD_VIEW, { ...current, ...view })
+  await $.state.set(TAB, 'board')
+  await $.state.set(DETAIL, null)
+  await $.ui.open({ id: PANE, title: PANE_TITLE })
+}
 const KIND_NAMES: Record<Kind, string> = {
   map: 'Map',
   spec: 'Spec',
@@ -199,11 +232,74 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'deck' }, async $ => {
+  on('command.run', { command: 'deck' }, async ($, e) => {
+    const args = e.args.trim()
+    if (args === 'new') {
+      return { text: (await startNew($)) ? 'Started a new Map or Spec.' : 'Nothing started.' }
+    }
+    if (args === 'bug') {
+      await startBug($)
+      return { text: 'Started a bug report.' }
+    }
     await refresh($)
     await $.ui.open({ id: PANE, title: PANE_TITLE })
 
     return { text: 'Skills Deck opened.' }
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
+    const { claimable, blocked, needsTriage } = derive(snapshot.items).counts
+    const menuOpen = (await $.state.get(SKILLS_MENU)).value ?? false
+    const loaded = menuOpen ? await loadedSkills($) : []
+    const installed = installedMattSkills(loaded ?? [])
+
+    return (
+      <Box flexDirection="column">
+        <Box>
+          <Button
+            key="count:claimable"
+            label={`Claimable ${claimable}`}
+            onPress={() => openBoard($, { filter: 'claimable', chips: [] })}
+          />
+          <Button
+            key="count:blocked"
+            label={`Blocked ${blocked}`}
+            onPress={() => openBoard($, { filter: 'blocked', chips: [] })}
+          />
+          <Button
+            key="count:needs-triage"
+            label={`Needs-triage ${needsTriage}`}
+            onPress={() => openBoard($, { filter: 'open', chips: ['needs-triage'] })}
+          />
+          <Button key="new" label="New" onPress={() => startNew($)} />
+          <Button key="bug" label="+Bug" onPress={() => startBug($)} />
+          <Button key="handoff" label="Handoff" onPress={() => fillPrompt($, HANDOFF_PROMPT)} />
+          <Button key="continue" label="Continue from handoff" onPress={() => fillPrompt($, CONTINUE_PROMPT)} />
+          <Button key="fixate" label="Fixate" onPress={() => fillPrompt($, FIXATE_PROMPT)} />
+          <Button
+            key="skills-menu"
+            label={marked(menuOpen, 'Skills')}
+            onPress={() => $.state.set(SKILLS_MENU, !menuOpen)}
+          />
+        </Box>
+        {menuOpen && (
+          <Box>
+            {loaded === null && <Text>Could not read the installed skills.</Text>}
+            {loaded !== null && installed.size === 0 && <Text dimColor>No Matt skills installed.</Text>}
+            {CATALOGUE.filter(skill => installed.has(skill.name)).map(skill => (
+              <Button
+                key={`band-skill:${skill.name}`}
+                label={`/${skill.name}`}
+                onPress={() => fillPrompt($, `/${skill.name}`)}
+              />
+            ))}
+          </Box>
+        )}
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

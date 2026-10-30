@@ -146,3 +146,23 @@ export const HEALTH_CHECK_PROMPT =
   'Health-check the tracker: find orphaned or broken tickets (missing parents, dangling Blocked-by links, ' +
   'files that do not parse, labels that contradict state) and propose a fix for each. ' +
   'Change nothing until I give my approval.'
+
+export const NEW_MAP_PROMPT =
+  '/wayfinder\n\nStart a new Map: ask me what I am trying to explore, then lay out its Notes, Decisions so far and Fog.'
+
+export const NEW_SPEC_PROMPT =
+  '/grill-with-docs\n\nGrill me on what I want to build. When we are done, run /to-spec to write the Spec, ' +
+  'then /to-tickets to split it into tickets.'
+
+export const BUG_PROMPT =
+  '/wayfinder\n\nI want to report a bug. Ask me questions until the bug is clear, scan the tracker for duplicates, ' +
+  'and if there is none file it as a ticket labelled `bug` and `needs-triage`.'
+
+export const HANDOFF_PROMPT = '/handoff'
+
+export const CONTINUE_PROMPT = 'Continue from this handoff file: '
+
+export const FIXATE_PROMPT =
+  'Fixate what we have settled: restate every question we have answered so far with its answer, ' +
+  'list any possible omissions, and then wait for me. Once I confirm, save them where they belong ' +
+  '(the glossary, an ADR, the spec or the ticket).'

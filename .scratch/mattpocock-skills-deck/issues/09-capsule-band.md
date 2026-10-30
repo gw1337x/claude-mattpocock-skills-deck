@@ -12,10 +12,10 @@
 
 **Blocked by:** 03, 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The band's counts match the Board
-- [ ] Each count opens the Pane with its filter
-- [ ] Every button fills its prompt and never sends
-- [ ] `/deck new` and `/deck bug` behave like their buttons
-- [ ] The band test passes on both surfaces
+- [x] The band's counts match the Board
+- [x] Each count opens the Pane with its filter
+- [x] Every button fills its prompt and never sends
+- [x] `/deck new` and `/deck bug` behave like their buttons
+- [x] The band test passes on both surfaces

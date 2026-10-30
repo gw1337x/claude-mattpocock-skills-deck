@@ -64,6 +64,8 @@ declare module 'claude-code' {
       tab: 'board' | 'skills'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
+      /** True while the Capsule band's Skills menu is open. */
+      skillsMenu: boolean
     }
   }
 }

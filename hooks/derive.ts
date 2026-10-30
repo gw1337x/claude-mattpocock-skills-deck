@@ -1,6 +1,6 @@
 import type { BoardFilter, BoardItem, BoardSort, BoardView } from '../types'
 
-export type Counts = { claimable: number; blocked: number; closed: number }
+export type Counts = { claimable: number; blocked: number; closed: number; needsTriage: number }
 
 export type Derived = {
   /** Paths of open Tickets waiting on a Ticket that is open or cannot be found. */
@@ -21,6 +21,7 @@ export const derive = (items: BoardItem[]): Derived => {
   const blocked = new Set<string>()
   const claimable = new Set<string>()
   let closed = 0
+  let needsTriage = 0
 
   for (const ticket of tickets) {
     if (ticket.state === 'closed') {
@@ -33,10 +34,11 @@ export const derive = (items: BoardItem[]): Derived => {
       const blocker = byRef.get(`${ticket.feature}/${number}`)
       return blocker === undefined || blocker.state === 'open'
     })
+    if (ticket.labels.includes('needs-triage')) needsTriage += 1
     if (waits) blocked.add(ticket.path)
     else if (!ticket.claimed) claimable.add(ticket.path)
   }
-  return { blocked, claimable, counts: { claimable: claimable.size, blocked: blocked.size, closed } }
+  return { blocked, claimable, counts: { claimable: claimable.size, blocked: blocked.size, closed, needsTriage } }
 }
 
 const SORTS: Record<BoardSort, (a: BoardItem, b: BoardItem) => number> = {

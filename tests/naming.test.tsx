@@ -74,9 +74,9 @@ for (const surface of SURFACES) {
       const question = (e as { questions?: { question: string }[] }).questions?.[0]?.question ?? ''
       return { result: { questions: [], answers: { [question]: 'Map' } } } as never
     })
-    const ui = (await $.ui.mount({ ...BAND, surface })) as Ui
+    const ui = await mountPane($)
 
-    await ui.press({ key: 'new' })
+    await ui.press({ key: 'pane-new' })
     await $.prompt.submit({ text: log.filled, wait: false, origin: COMPOSER })
     await turnComplete($)
 

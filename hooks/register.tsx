@@ -281,6 +281,23 @@ const freshness = (readAt: number, now: number): string => {
   return minutes < 1 ? 'Updated just now' : `Updated ${minutes} min ago`
 }
 
+/** The status bar's colours, as DSH draws them. */
+const GREEN = '#3fb950'
+const RED = '#f85149'
+const AMBER = '#d29922'
+const PURPLE = '#bc8cff'
+const BLUE = '#58a6ff'
+const GREY_INK = '#8b949e'
+
+/** How old the snapshot may get before the band's time turns red. */
+const STALE_MS = 30 * 60_000
+
+/** `23:50`: when the snapshot was read, on the clock. */
+const clockTime = (ms: number): string => {
+  const at = new Date(ms)
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+}
+
 const FILTERS: [BoardFilter, string][] = [
   ['all', 'All'],
   ['open', 'Open'],
@@ -406,7 +423,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
-    const { claimable, blocked, needsTriage } = derive(snapshot.items).counts
+    const { claimable, bugs, needsTriage } = derive(snapshot.items).counts
     const menuOpen = (await $.state.get(SKILLS_MENU)).value ?? false
     const loaded = menuOpen ? await loadedSkills($) : []
     const installed = installedMattSkills(loaded ?? [])
@@ -421,16 +438,18 @@ export const register: Register = on => {
     // Only a score the Env Check already worked out; the band never runs the checks itself.
     const envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
     const env = envChecks === null ? null : scoreOf(envChecks)
+    const envColor = env === null ? GREY_INK : env.passed === env.total ? GREEN : AMBER
+    // DSH turns the time red once the snapshot is stale.
+    const stale = now - snapshot.readAt > STALE_MS
 
-    /** One control of the status bar: an icon and a word in its colour, named by `label`. */
-    const item = (key: string, label: string, text: string, color: string | undefined, onPress: () => unknown, chosen = false) => (
-      <Button key={key} label={label} plain variant={chosen ? 'primary' : undefined} onPress={onPress}>
-        <Text color={color} weight="medium">
-          {text}
-        </Text>
+    /** One control of the status bar: an icon, a word and a count, all in one colour, named by `label`. */
+    const item = (key: string, label: string, color: string, onPress: () => unknown, icon: string, word?: string, count?: number) => (
+      <Button key={key} label={label} plain onPress={onPress}>
+        <Text color={color}>{icon}</Text>
+        {word !== undefined && <Text color={color} weight="medium">{` ${word}`}</Text>}
+        {count !== undefined && <Text color={color} weight="semibold" tabular>{` ${count}`}</Text>}
       </Button>
     )
-    const divider = <Text dimColor>│</Text>
 
     return (
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
@@ -460,7 +479,7 @@ export const register: Register = on => {
                   await $.ui.open({ id: PANE, title: PANE_TITLE })
                 }}
               >
-                <Text color="#58a6ff" mono weight="semibold">{`#${entry.ticket} `}</Text>
+                <Text color={BLUE} mono weight="semibold">{`#${entry.ticket} `}</Text>
                 <Text>{`${entry.title} `}</Text>
                 <Text backgroundColor="#30363d" color="#c9d1d9" size="footnote">{` ${entry.action} `}</Text>
                 <Text dimColor size="footnote">{`  ${ago(entry.time, now)}`}</Text>
@@ -487,71 +506,52 @@ export const register: Register = on => {
           flexDirection="row"
           justifyContent="space-between"
           alignItems="center"
-          flexWrap="wrap"
           columnGap="md"
-          rowGap="xs"
           borderStyle="round"
           borderColor="#30363d"
-          paddingX="sm"
+          paddingX="md"
+          paddingY="xs"
         >
-          <Box flexDirection="row" alignItems="center" flexWrap="wrap" columnGap="md" rowGap="xs">
-            {item('open-deck', 'Skills Deck', '◉ MattSkills', undefined, () => openBoard($, { filter: 'all', chips: [] }))}
-            {item(
-              'route',
-              latest ? `Work Route #${latest.ticket}` : 'Work Route',
-              latest ? `⌖ #${latest.ticket}` : '⌖ Route',
-              '#58a6ff',
-              () => $.state.set(ROUTE_OPEN, !routeOpen),
-              routeOpen,
+          {item('open-deck', 'Skills Deck', '#c9d1d9', () => openBoard($, { filter: 'all', chips: [] }), '◷')}
+          {item(
+            'route',
+            latest ? `Work Route #${latest.ticket}` : 'Work Route',
+            routeOpen ? BLUE : GREY_INK,
+            () => $.state.set(ROUTE_OPEN, !routeOpen),
+            '⌖',
+            latest ? `#${latest.ticket}` : 'Route',
+          )}
+          {item('count:claimable', `Ready ${claimable}`, GREEN, () => openBoard($, { filter: 'claimable', chips: [] }), '⊙', 'Ready', claimable)}
+          {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', 'BUG', bugs)}
+          {item(
+            'count:needs-triage',
+            `Triage ${needsTriage}`,
+            AMBER,
+            () => openBoard($, { filter: 'open', chips: ['needs-triage'] }),
+            '⌕',
+            'Triage',
+            needsTriage,
+          )}
+          {!collapsed && item('fixate', 'Consolidate', PURPLE, () => fillPrompt($, FIXATE_PROMPT), '▤', 'Consolidate')}
+          {!collapsed && item('handoff', 'Handoff', BLUE, () => fillPrompt($, HANDOFF_PROMPT), '⇆', 'Handoff')}
+          {!collapsed && item('continue', 'Continue from a handoff', BLUE, () => fillPrompt($, CONTINUE_PROMPT), '⎘')}
+          {!collapsed &&
+            item(
+              'env',
+              env === null ? 'Env Check' : `Env ${env.passed}/${env.total}`,
+              envColor,
+              async () => {
+                await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
+                await $.state.set(TAB, 'env')
+                await $.state.set(DETAIL, null)
+                await $.ui.open({ id: PANE, title: PANE_TITLE })
+              },
+              env !== null && env.passed < env.total ? '⚠' : '✓',
             )}
-            {item(
-              'count:claimable',
-              `Claimable ${claimable}`,
-              `${STATUS_STYLES.claimable.icon} Claimable ${claimable}`,
-              STATUS_STYLES.claimable.color,
-              () => openBoard($, { filter: 'claimable', chips: [] }),
-            )}
-            {item(
-              'count:blocked',
-              `Blocked ${blocked}`,
-              `${STATUS_STYLES.blocked.icon} Blocked ${blocked}`,
-              STATUS_STYLES.blocked.color,
-              () => openBoard($, { filter: 'blocked', chips: [] }),
-            )}
-            {item('count:needs-triage', `Needs-triage ${needsTriage}`, `✎ Triage ${needsTriage}`, '#d29922', () =>
-              openBoard($, { filter: 'open', chips: ['needs-triage'] }),
-            )}
-            {!collapsed && divider}
-            {!collapsed && item('new', 'New', '◈ New', KIND_STYLES.map.color, () => startNew($))}
-            {!collapsed && item('bug', '+Bug', '✱ +Bug', KIND_STYLES.bug.color, () => startBug($))}
-            {!collapsed && item('fixate', 'Fixate', '▤ Fixate', '#d2a8ff', () => fillPrompt($, FIXATE_PROMPT))}
-            {!collapsed && item('handoff', 'Handoff', '⇆ Handoff', '#58a6ff', () => fillPrompt($, HANDOFF_PROMPT))}
-            {!collapsed && item('continue', 'Continue', '↪ Continue', '#58a6ff', () => fillPrompt($, CONTINUE_PROMPT))}
-            {!collapsed &&
-              env !== null &&
-              item(
-                'env',
-                `Env ${env.passed}/${env.total}`,
-                `${env.passed === env.total ? '✓' : '⚠'} Env ${env.passed}/${env.total}`,
-                env.passed === env.total ? STATUS_STYLES.claimable.color : '#d29922',
-                async () => {
-                  await $.state.set(TAB, 'env')
-                  await $.state.set(DETAIL, null)
-                  await $.ui.open({ id: PANE, title: PANE_TITLE })
-                },
-              )}
-          </Box>
-          <Box flexDirection="row" alignItems="center" columnGap="sm">
-            {!collapsed && (
-              <Text dimColor size="footnote">
-                {`↻ ${freshness(snapshot.readAt, now)}`}
-              </Text>
-            )}
-            {!collapsed && item('skills-menu', 'Skills', '⊞', undefined, () => $.state.set(SKILLS_MENU, !menuOpen), menuOpen)}
-            {item('band-collapse', collapsed ? 'Expand' : 'Collapse', collapsed ? '⌃' : '⌄', undefined, () =>
-              $.state.set(BAND_COLLAPSED, !collapsed),
-            )}
-          </Box>
+          {!collapsed &&
+            item('refresh-band', `Updated ${clockTime(snapshot.readAt)}`, stale ? RED : GREY_INK, () => refresh($), '↻', clockTime(snapshot.readAt))}
+          {!collapsed && item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞')}
+          {item('band-collapse', collapsed ? 'Expand' : 'Collapse', GREY_INK, () => $.state.set(BAND_COLLAPSED, !collapsed), collapsed ? '⌃' : '⌄')}
         </Box>
       </Box>
     )

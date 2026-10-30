@@ -1,6 +1,6 @@
 {
   "name": "mattpocock-skills-deck",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "author": { "name": "gw1337x" },
   "description": "A task board beside the chat for the mattpocock/skills workflow: Maps, Specs and Tickets with one next Action each."

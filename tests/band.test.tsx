@@ -109,9 +109,9 @@ for (const surface of SURFACES) {
 
     expect(await boardCounts(pane)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
     const shown = await buttonLabels(band)
-    expect(shown).toContain('Claimable 3')
-    expect(shown).toContain('Blocked 1')
-    expect(shown).toContain('Needs-triage 2')
+    expect(shown).toContain('Ready 3')
+    expect(shown).toContain('Bug 1')
+    expect(shown).toContain('Triage 2')
     await band.unmount()
     await pane.unmount()
   })
@@ -121,11 +121,13 @@ for (const surface of SURFACES) {
     const log = serveBox(on)
     const band = await mountBand($, surface)
 
-    await band.press({ key: 'count:blocked' })
+    await band.press({ key: 'count:bug' })
     expect(log.opened).toEqual(['deck'])
     let pane = await mountPane($, surface)
-    expect(await isOn(pane, 'filter:blocked')).toBe(true)
-    expect((await everything(pane)).some(t => /Download button/.test(t))).toBe(true)
+    expect(await isOn(pane, 'filter:open')).toBe(true)
+    expect(await isOn(pane, 'chip:bug')).toBe(true)
+    expect((await cardTexts(pane)).some(t => /Login crashes/.test(t))).toBe(true)
+    expect((await cardTexts(pane)).some(t => /Download button/.test(t))).toBe(false)
     await pane.unmount()
 
     await band.press({ key: 'count:claimable' })
@@ -162,10 +164,10 @@ for (const surface of SURFACES) {
   test(`New offers Map and Spec and fills the matching prompt without sending on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveBox(on, ['Map', 'Spec'])
-    const band = await mountBand($, surface)
+    const pane = await mountPane($, surface)
 
-    await band.press({ key: 'new' })
-    await band.press({ key: 'new' })
+    await pane.press({ key: 'pane-new' })
+    await pane.press({ key: 'pane-new' })
 
     expect(log.fills).toHaveLength(2)
     expect(log.fills[0]).toMatch(/^\/wayfinder/)
@@ -173,26 +175,28 @@ for (const surface of SURFACES) {
     expect(log.fills[1]).toContain('/to-spec')
     expect(log.fills[1]).toContain('/to-tickets')
     expect(log.submitted).toBe(0)
-    await band.unmount()
+    await pane.unmount()
   })
 
   test(`New fills nothing when the question is dismissed on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveBox(on, [''])
-    const band = await mountBand($, surface)
+    const pane = await mountPane($, surface)
 
-    await band.press({ key: 'new' })
+    await pane.press({ key: 'pane-new' })
 
     expect(log.fills).toEqual([])
-    await band.unmount()
+    await pane.unmount()
   })
 
-  test(`+Bug, Handoff, continue and Fixate fill their prompts and never send on ${surface}`, async ($, on) => {
+  test(`+Bug, Handoff, continue and Consolidate fill their prompts and never send on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveBox(on)
     const band = await mountBand($, surface)
+    const pane = await mountPane($, surface)
 
-    for (const key of ['bug', 'handoff', 'continue', 'fixate']) await band.press({ key })
+    await pane.press({ key: 'pane-bug' })
+    for (const key of ['handoff', 'continue', 'fixate']) await band.press({ key })
 
     expect(log.fills).toHaveLength(4)
     const [bug, handoff, resume, fixate] = log.fills

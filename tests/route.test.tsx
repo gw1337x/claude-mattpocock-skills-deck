@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { buttonLabels, isOn } from './board-text'
+import { buttonLabels } from './board-text'
 import { serveFiles } from './serve-files'
 
 const BAND = {
@@ -148,7 +148,7 @@ for (const surface of SURFACES) {
     const shown = await everything(band)
     expect(shown.some(t => /other session/.test(t))).toBe(false)
     expect(shown.some(t => t.startsWith('#8 '))).toBe(false)
-    expect(await isOn(band, 'route')).toBe(true)
+    expect(await everything(band)).toContain('Work Route')
 
     await $.tool.call({ tool: 'Bash', command: 'gh issue view 3' })
     const tickets = (held[STORE_KEY] as { ticket: number }[]).map(r => r.ticket)

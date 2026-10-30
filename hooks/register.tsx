@@ -61,6 +61,13 @@ const resolveBackend = async ($: Engine): Promise<Backend> => {
 /** `$.process` cannot be passed as a value either. */
 const ghRun = ($: Engine): Run => argv => $.process.run(argv)
 
+/** A `gh` failure as a snapshot: no items, and the message the Pane shows. */
+const failedSnapshot = async ($: Engine, error: GhError, previous?: BoardSnapshot): Promise<BoardSnapshot> => ({
+  items: previous?.items ?? [],
+  readAt: previous?.readAt ?? (await $.clock.now()),
+  error: error.message,
+})
+
 /** Reads the tracker now; nothing is stored, so a render may call it. A `gh` failure becomes the snapshot's error. */
 const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> => {
   try {
@@ -75,7 +82,7 @@ const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> =>
           })
     return { items, readAt: await $.clock.now() }
   } catch (error) {
-    if (error instanceof GhError) return { items: [], readAt: await $.clock.now(), error: error.message }
+    if (error instanceof GhError) return failedSnapshot($, error)
     throw error
   }
 }
@@ -205,12 +212,7 @@ export const register: Register = on => {
           await postGithubComment(ghRun($), item.number ?? 0, comment)
         } catch (error) {
           if (!(error instanceof GhError)) throw error
-          const previous = (await $.state.get(SNAPSHOT)).value
-          await $.state.set(SNAPSHOT, {
-            items: previous?.items ?? [],
-            readAt: previous?.readAt ?? (await $.clock.now()),
-            error: error.message,
-          })
+          await $.state.set(SNAPSHOT, await failedSnapshot($, error, (await $.state.get(SNAPSHOT)).value))
           return
         }
       } else {

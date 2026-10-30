@@ -103,20 +103,23 @@ export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
     }
   })
 
-  for (const item of items) {
-    if (isContainer(item)) {
-      const children = numbersOf(await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/sub_issues`]))
-      for (const child of items) {
-        if (child.number !== null && children.includes(child.number)) child.parent = item.path
+  await Promise.all(
+    items.map(async item => {
+      if (isContainer(item)) {
+        const children = numbersOf(await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/sub_issues`]))
+        for (const child of items) {
+          if (child.number !== null && children.includes(child.number)) child.parent = item.path
+        }
       }
-    }
-    if (item.state === 'open') {
-      const native = numbersOf(
-        await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/dependencies/blocked_by`]),
-      )
-      item.blockedBy = [...new Set([...native, ...item.blockedBy])]
-    }
-  }
+      if (item.state === 'open') {
+        const native = numbersOf(
+          await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/dependencies/blocked_by`]),
+        )
+        // The body's `Blocked by:` lines only stand in when GitHub holds no dependency.
+        if (native.length > 0) item.blockedBy = native
+      }
+    }),
+  )
   return items
 }
 

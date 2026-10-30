@@ -42,6 +42,8 @@ const levelsOf = (tickets: BoardItem[], byRef: Map<string, BoardItem>): Map<stri
 export const derive = (items: BoardItem[]): Derived => {
   const tickets = items.filter(item => !isContainer(item))
   const byRef = new Map(tickets.map(item => [`${item.feature}/${item.number}`, item]))
+  // DSH: a blocker not found in the Ticket's own feature does not block when its number exists in another one.
+  const numbersElsewhere = new Set(tickets.map(item => item.number))
   const blocked = new Set<string>()
   const ready = new Set<string>()
   let closed = 0
@@ -57,7 +59,8 @@ export const derive = (items: BoardItem[]): Derived => {
     if (ticket.warning !== undefined) continue
     const waits = ticket.blockedBy.some(number => {
       const blocker = byRef.get(`${ticket.feature}/${number}`)
-      return blocker === undefined || blocker.state === 'open'
+      if (blocker === undefined) return !numbersElsewhere.has(number)
+      return blocker.state === 'open'
     })
     if (ticket.labels.includes('needs-triage')) needsTriage += 1
     if (ticket.kind === 'bug' || ticket.labels.includes('bug')) bugs += 1

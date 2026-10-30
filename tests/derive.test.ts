@@ -44,6 +44,12 @@ test('a blocker that cannot be found counts as blocking, at Level 1', () => {
   expect(found.levels.get('.scratch/f/issues/1.md')).toBe(1)
 })
 
+test('a blocker whose number exists in another feature does not block, as in DSH', () => {
+  const other = ticket(9, { feature: 'g', path: '.scratch/g/issues/9.md' })
+  const found = derive([ticket(1, { blockedBy: [9] }), other])
+  expect(found.blocked.has('.scratch/f/issues/1.md')).toBe(false)
+})
+
 test('Progress reads the heading percentage, else the newest entry', () => {
   expect(readProgress('## Progress: 40%\n- 20% 10:00 started')).toBe(40)
   expect(readProgress('intro\n\n## Progress\n- 60% 12:00 halfway\n- 20% 10:00 started\n\n## Notes\n99%')).toBe(60)

@@ -3,7 +3,7 @@ import { mock } from 'claude-code/testing'
 
 /**
  * Answers `$.clock` from a clock that only the test moves (returned), and
- * `$.fs` from a fixture tree, the way the engine would. The engine
+ * `$.fs` from a fixture tree (writes change it, so pass a copy), the way the engine would. The engine
  * resolves paths against the working directory, so a path arrives absolute;
  * `relative` maps it back to the fixture's repo-relative key.
  */
@@ -27,9 +27,10 @@ export const serveFiles = (
       })
     }
   }
-  const keys = Object.keys(files)
+  /** Live, since `fs.write` adds and changes files. */
+  const keys = () => Object.keys(files)
   const isFile = (path: string) => path in files
-  const isDir = (path: string) => keys.some(key => key.startsWith(`${path}/`))
+  const isDir = (path: string) => keys().some(key => key.startsWith(`${path}/`))
   /** The longest suffix of `path` that the fixture knows, else null. */
   const relative = (path: string): string | null => {
     const parts = path.replace(/\\/g, '/').replace(/\/$/, '').split('/')
@@ -47,6 +48,11 @@ export const serveFiles = (
     if (text === undefined) return { deny: `ENOENT: ${e.path}` }
     return { value: text }
   })
+  /** A write lands in `files`, which the test reads back; a path the fixture does not know is kept as given. */
+  on('fs.write', (_, e) => {
+    files[relative(e.path) ?? e.path.replace(/\\/g, '/')] = e.text
+    return { value: undefined }
+  })
   on('fs.list', (_, e) => {
     if (unreadable !== undefined && relative(e.path) === unreadable) {
       return { deny: `EACCES: ${e.path}` }
@@ -56,7 +62,7 @@ export const serveFiles = (
     const prefix = dir === '' ? '' : `${dir}/`
     const names = new Map<string, 'file' | 'dir'>()
     const modified = new Map<string, number>()
-    for (const key of keys) {
+    for (const key of keys()) {
       if (!key.startsWith(prefix)) continue
       const [head = '', ...rest] = key.slice(prefix.length).split('/')
       names.set(head, rest.length > 0 ? 'dir' : 'file')

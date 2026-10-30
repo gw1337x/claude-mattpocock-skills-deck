@@ -5,6 +5,7 @@ import { actionFor, containerAction, HEALTH_CHECK_PROMPT, progressOf } from './a
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
 import { readMarkdownItems } from './markdown-tracker'
+import { appendComment, readTicketDetail } from './ticket'
 
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
 type Engine = Parameters<Hook<'session.start'>>[0]
@@ -122,7 +123,10 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Link, Markdown, Text } = elements
+    // Every surface has the rest; only some have an `Input`.
+    const Input = 'Input' in elements ? elements.Input : undefined
     const view: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
     const choose = async (change: Partial<BoardView>) => {
       const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
@@ -146,6 +150,12 @@ export const register: Register = on => {
       return action ? (
         <Button key={`action:${item.path}`} label={action.name} onPress={() => fillPrompt($, action.prompt)} />
       ) : null
+    }
+
+    const postComment = async (path: string, comment: string) => {
+      if (comment.trim() === '') return
+      await $.fs.write(path, appendComment(await $.fs.read(path), comment, new Date(await $.clock.now())))
+      await refresh($)
     }
 
     let backend: Backend = 'markdown'
@@ -176,10 +186,66 @@ export const register: Register = on => {
           {children.map(child => (
             <Box key={`child:${child.path}`} flexDirection="column">
               <Text>{cardLine(child)}</Text>
-              <Box>{renderAction(child, items)}</Box>
+              <Box>
+                {renderAction(child, items)}
+                <Button key={`detail:${child.path}`} label="Details" onPress={() => showDetail(child.path)} />
+              </Box>
               {child.warning && <Text dimColor>{child.warning}</Text>}
             </Box>
           ))}
+        </Box>
+      )
+    }
+
+    const ticket = detailPath === null ? undefined : items.find(item => item.path === detailPath)
+    if (ticket) {
+      let text = ''
+      let unreadable = false
+      try {
+        text = await $.fs.read(ticket.path)
+      } catch {
+        unreadable = true
+      }
+      const { body, comments } = readTicketDetail(text)
+      const blockers = ticket.blockedBy.map(number => ({
+        number,
+        item: items.find(item => item.feature === ticket.feature && item.number === number),
+      }))
+      return (
+        <Box flexDirection="column">
+          <Button key="back" label="Back" onPress={() => showDetail(null)} />
+          <Text bold>{`${KIND_NAMES[ticket.kind]}: ${ticket.title}`}</Text>
+          <Text>{cardLine(ticket)}</Text>
+          <Box>{renderAction(ticket, items)}</Box>
+          {ticket.warning && <Text dimColor>{ticket.warning}</Text>}
+          {unreadable ? <Text dimColor>Could not read this file.</Text> : <Markdown text={body} />}
+          <Text bold>Blocked by</Text>
+          {blockers.length === 0 && <Text dimColor>None</Text>}
+          {blockers.map(({ number, item }) =>
+            item ? (
+              <Button
+                key={`blocker:${item.path}`}
+                label={`#${number} ${item.title}`}
+                onPress={() => showDetail(item.path)}
+              />
+            ) : (
+              <Text dimColor>{`#${number} (not found)`}</Text>
+            ),
+          )}
+          <Text bold>{`Comments (${comments.length})`}</Text>
+          {comments.map(comment => (
+            <Markdown text={comment} />
+          ))}
+          {Input && backend === 'markdown' && !unreadable && (
+            <Input
+              key="comment"
+              label="Comment"
+              placeholder="Write a comment"
+              value=""
+              submitLabel="post"
+              onSubmit={(value: string) => postComment(ticket.path, value)}
+            />
+          )}
         </Box>
       )
     }
@@ -230,9 +296,7 @@ export const register: Register = on => {
             <Text>{cardLine(item)}</Text>
             <Box>
               {renderAction(item, items)}
-              {isContainer(item) && (
-                <Button key={`detail:${item.path}`} label="Details" onPress={() => showDetail(item.path)} />
-              )}
+              <Button key={`detail:${item.path}`} label="Details" onPress={() => showDetail(item.path)} />
               <Button
                 key={`copy:${item.path}`}
                 label="Copy link"

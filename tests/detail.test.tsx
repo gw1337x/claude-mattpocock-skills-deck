@@ -121,3 +121,92 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 }
+
+const BLOCKED = '.scratch/f/issues/02-b.md'
+const BLOCKER = '.scratch/f/issues/01-a.md'
+const TICKETS: Record<string, string> = {
+  [BLOCKER]: '# 01: Blocker ticket\n\nStatus: resolved\n',
+  [BLOCKED]:
+    '# 02: Blocked ticket\n\nBlocked by: 01\nStatus: ready-for-agent\n\nBody sentence here.\n\n## Comments\n\n### 2026-01-01T00:00:00.000Z\n\nFirst comment.\n',
+}
+
+const everything = async (ui: Ui) => [
+  ...(await ui.findAll({ type: 'Text' })),
+  ...(await ui.findAll({ type: 'Markdown' })),
+  ...(await ui.findAll({ type: 'Button' })),
+].map(t => t.text ?? '')
+
+type Typing = Ui & { input: (target: { key: string; text: string }) => Promise<unknown> }
+
+for (const surface of SURFACES) {
+  test(`a Ticket detail shows body, blockers, comments and Action on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...TICKETS })
+    const fills = serveBox(on)
+    const ui = await mount($, surface)
+
+    await ui.press({ key: `detail:${BLOCKED}` })
+    const shown = (await everything(ui)).join('\n')
+
+    expect(shown).toContain('Body sentence here.')
+    expect(shown).toContain('Blocker ticket')
+    expect(shown).toContain('First comment.')
+    expect(shown).not.toContain('## Comments')
+    await ui.press({ key: `action:${BLOCKED}` })
+    expect(fills[0]).toMatch(/^\/implement /)
+    await ui.unmount()
+  })
+
+  test(`pressing a blocker opens that Ticket on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...TICKETS })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: `detail:${BLOCKED}` })
+    await ui.press({ key: `blocker:${BLOCKER}` })
+
+    expect(await texts(ui)).toContain('Ticket: Blocker ticket')
+    await ui.unmount()
+  })
+
+  test(`posting a comment appends one entry and the detail shows it on ${surface}`, async ($, on) => {
+    const files = { ...TICKETS }
+    serveFiles(on, files)
+    const ui = (await mount($, surface)) as Typing
+
+    await ui.press({ key: `detail:${BLOCKED}` })
+    await ui.input({ key: 'comment', text: 'Second comment.' })
+
+    const text = files[BLOCKED] ?? ''
+    expect(text.match(/^## Comments$/gm)).toHaveLength(1)
+    expect(text.match(/Second comment\./g)).toHaveLength(1)
+    expect(text.match(/First comment\./g)).toHaveLength(1)
+    expect(text.indexOf('First comment.')).toBeLessThan(text.indexOf('Second comment.'))
+    expect((await everything(ui)).join('\n')).toContain('Second comment.')
+    await ui.unmount()
+  })
+
+  test(`posting on a Ticket with no comments section creates it on ${surface}`, async ($, on) => {
+    const files = { ...TICKETS }
+    serveFiles(on, files)
+    const ui = (await mount($, surface)) as Typing
+
+    await ui.press({ key: `detail:${BLOCKER}` })
+    await ui.input({ key: 'comment', text: 'Hello there.' })
+
+    expect(files[BLOCKER]?.match(/^## Comments$/gm)).toHaveLength(1)
+    expect(files[BLOCKER]).toMatch(/Hello there\.\n$/)
+    expect(files[BLOCKER]).toContain('# 01: Blocker ticket')
+    await ui.unmount()
+  })
+
+  test(`a blank comment writes nothing on ${surface}`, async ($, on) => {
+    const files = { ...TICKETS }
+    serveFiles(on, files)
+    const ui = (await mount($, surface)) as Typing
+
+    await ui.press({ key: `detail:${BLOCKED}` })
+    await ui.input({ key: 'comment', text: '   ' })
+
+    expect(files[BLOCKED]).toBe(TICKETS[BLOCKED])
+    await ui.unmount()
+  })
+}

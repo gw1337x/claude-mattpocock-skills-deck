@@ -14,7 +14,7 @@ export type Derived = {
 
 export const DEFAULT_VIEW: BoardView = { filter: 'all', sort: 'updated', chips: [] }
 
-const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
+export const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
 /** Levels over the blocker graph; a Ticket met again while its own Level is being worked out counts as Level 0, so cycles end. */
 const levelsOf = (tickets: BoardItem[], byRef: Map<string, BoardItem>): Map<string, number> => {

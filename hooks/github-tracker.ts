@@ -79,11 +79,14 @@ const numbersOf = (value: unknown): number[] =>
 
 const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
+/** The most issues one read takes; a read that returns this many may have left some out. */
+export const GH_LIST_LIMIT = 500
+
 /** Every issue in the repo as List items; a Container's sub-issues carry its path as `parent`. */
 export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
   const listed = JSON.parse(
     await runGh(run, [
-      'issue', 'list', '--state', 'all', '--limit', '500',
+      'issue', 'list', '--state', 'all', '--limit', String(GH_LIST_LIMIT),
       '--json', 'number,title,state,labels,assignees,updatedAt,url,body',
     ]),
   ) as Issue[]

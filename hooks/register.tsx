@@ -29,6 +29,7 @@ import { allLabels, DEFAULT_VIEW, derive, progressText, visibleItems, type Deriv
 import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
+  GH_LIST_LIMIT,
   GhError,
   postGithubComment,
   readGithubDetail,
@@ -51,6 +52,7 @@ import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
+import { DECK_READS, DECK_TOOLS, deckContext, DeckRefusal, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
 import { ago, itemFor, othersLine, ownRoute, prune, touchOf, type RouteEntry } from './work-route'
@@ -164,24 +166,37 @@ const readRoute = async ($: Engine): Promise<RouteEntry[]> => {
   }
 }
 
-/** The person's override for this repo if there is one, else `workspace.yaml`, else what the tracker doc names, else Markdown. */
-const resolveBackend = async ($: Engine): Promise<Backend> => {
+/** The person's override for this repo if there is one, else `workspace.yaml`, else what the tracker doc names; null when none names one. */
+const findBackend = async ($: Engine): Promise<FoundBackend | null> => {
   try {
     const stored = await $.store.get(await overrideKey($))
-    if (stored === 'github' || stored === 'markdown') return stored
+    if (stored === 'github' || stored === 'markdown') return { backend: stored, source: 'override' }
   } catch {
     // No store: detection decides.
   }
   try {
     const workspace = readWorkspace(await $.fs.read(WORKSPACE_FILE)).backend
-    if (workspace !== null) return workspace
+    if (workspace !== null) return { backend: workspace, source: 'workspace.yaml' }
   } catch {
     // No workspace.yaml: the tracker doc decides.
   }
   try {
-    return detectBackend(await $.fs.read(TRACKER_DOC)) ?? 'markdown'
+    const named = detectBackend(await $.fs.read(TRACKER_DOC))
+    return named === null ? null : { backend: named, source: 'issue-tracker.md' }
   } catch {
-    return 'markdown'
+    return null
+  }
+}
+
+/** The Backend the List draws: as found, else Markdown. */
+const resolveBackend = async ($: Engine): Promise<Backend> => (await findBackend($))?.backend ?? 'markdown'
+
+/** The folder the session works in, for deck_context. */
+const workspaceRoot = async ($: Engine): Promise<string> => {
+  try {
+    return await $.session.root()
+  } catch {
+    return repoKey($)
   }
 }
 
@@ -212,6 +227,40 @@ const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> =>
     if (error instanceof GhError) return failedSnapshot($, error)
     throw error
   }
+}
+
+/** The tracker as a Deck tool reads it: fresh, with a `gh` failure refused to the model. */
+const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
+  const snapshot = await readBoard($, backend)
+  if (snapshot.error !== undefined) throw new DeckRefusal(snapshot.error)
+  return {
+    backend,
+    items: snapshot.items,
+    partial: backend === 'github' && snapshot.items.length >= GH_LIST_LIMIT,
+    detail: async item => {
+      try {
+        if (backend === 'github') return await readGithubDetail(ghRun($), item.number ?? 0)
+        return readTicketDetail(await $.fs.read(item.path))
+      } catch (error) {
+        if (error instanceof GhError) throw new DeckRefusal(error.message)
+        throw new DeckRefusal(`Could not read ${item.path}.`)
+      }
+    },
+  }
+}
+
+/** Answers one Deck tool call; a refusal reaches the model as the call's error. */
+const answerDeckTool = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
+  const found = await findBackend($)
+  if (name === 'deck_context') {
+    // Naming a GitHub Backend needs no read, so a `gh` failure cannot hide it; Markdown is read for its efforts.
+    const items = found?.backend === 'markdown' ? (await readDeck($, 'markdown')).items : []
+    return deckContext(await workspaceRoot($), found, items)
+  }
+  if (found === null) throw new DeckRefusal(NO_BACKEND)
+  const read = DECK_READS[name]
+  if (read === undefined) throw new DeckRefusal(`Unknown deck tool ${name}.`)
+  return read(await readDeck($, found.backend), input)
 }
 
 /** Re-reads the tracker into the session's snapshot, which the Pane draws from. */
@@ -382,9 +431,21 @@ export const register: Register = on => {
       name: 'deck',
       description: 'Open the Skills Deck list beside the chat',
     })
+    for (const tool of DECK_TOOLS) await $.tool.register(tool)
 
     return next(e)
   })
+
+  for (const tool of DECK_TOOLS) {
+    on('tool.call', { tool: `mcp__mattpocock-skills-deck__${tool.name}` }, async ($, e) => {
+      try {
+        return { result: JSON.stringify(await answerDeckTool($, tool.name, e), null, 2) }
+      } catch (error) {
+        if (error instanceof DeckRefusal) return { deny: error.message }
+        throw error
+      }
+    })
+  }
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)

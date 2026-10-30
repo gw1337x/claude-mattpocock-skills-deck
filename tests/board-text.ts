@@ -1,4 +1,4 @@
-/** Reads the Board as the person sees it: whole cards, the count bar, and which buttons are on. */
+/** Reads the List as the person sees it: whole cards, the count bar, and which buttons are on. */
 
 type Node = { type?: string; key?: string; label?: string; text?: string; props?: Record<string, unknown>; children?: unknown[] }
 
@@ -43,12 +43,12 @@ const subtrees = (value: unknown, match: (key: string) => boolean, found: Node[]
 export const cardTexts = async (ui: object): Promise<string[]> =>
   subtrees(await asDrawn(ui).drawn(), key => key.startsWith('card:')).map(textOf)
 
-/** The Board's count bar as numbers. */
-export const boardCounts = async (ui: object) => {
+/** The List's count bar as numbers. */
+export const listCounts = async (ui: object) => {
   const [bar] = subtrees(await asDrawn(ui).drawn(), key => key === 'counts')
   const text = bar ? textOf(bar) : ''
   const count = (name: string) => Number(new RegExp(`(\\d+) ${name}`).exec(text)?.[1] ?? NaN)
-  return { claimable: count('Claimable'), blocked: count('Blocked'), closed: count('Closed') }
+  return { ready: count('Ready'), blocked: count('Blocked'), closed: count('Closed') }
 }
 
 /** True when the Button keyed `key` is drawn as the chosen one. */

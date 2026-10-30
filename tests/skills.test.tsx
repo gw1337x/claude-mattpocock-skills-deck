@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { listCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -152,15 +152,15 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`the Board tab returns to the Board on ${surface}`, async ($, on) => {
+  test(`the List tab returns to the List on ${surface}`, async ($, on) => {
     serveFiles(on, files())
     serveSkills(on, ['tdd'])
     const ui = await mount($, surface)
 
     await ui.press({ key: 'tab:skills' })
-    await ui.press({ key: 'tab:board' })
+    await ui.press({ key: 'tab:list' })
 
-    expect(await isOn(ui, 'tab:board')).toBe(true)
+    expect(await isOn(ui, 'tab:list')).toBe(true)
     expect(await keys(ui)).toContain('refresh')
     await ui.unmount()
   })

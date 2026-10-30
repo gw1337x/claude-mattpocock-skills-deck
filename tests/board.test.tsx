@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { listCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -24,29 +24,29 @@ const SURFACES = ['terminal', 'desktop'] as const
 const texts = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) =>
   (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
 
-const mountBoard = async ($: Engine, surface: (typeof SURFACES)[number]) =>
+const mountList = async ($: Engine, surface: (typeof SURFACES)[number]) =>
   $.ui.mount({ ...PANE, surface })
 
 for (const surface of SURFACES) {
-  test(`the Board lists every Map, Spec and standalone Ticket with its Kind on ${surface}`, async ($, on) => {
+  test(`the List lists every Map, Spec and standalone Ticket with its Kind on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
     const cards = await cardTexts(ui)
 
-    expect(await isOn(ui, 'tab:board')).toBe(true)
+    expect(await isOn(ui, 'tab:list')).toBe(true)
     expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     expect(cards).toContainEqual(
-      expect.stringMatching(/Bug.*loose #1.*Login crashes on empty password.*Claimable.*needs-triage/),
+      expect.stringMatching(/Bug.*loose #1.*Login crashes on empty password.*Ready.*needs-triage/),
     )
-    // Children of a Container are not listed on the Board.
+    // Children of a Container are not listed on the List.
     expect(cards.some(c => /Download button/.test(c))).toBe(false)
     await ui.unmount()
   })
 
   test(`a file that does not parse is a plain Ticket with a warning on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
     const cards = await cardTexts(ui)
 
     expect(cards).toContainEqual(expect.stringMatching(/Ticket.*loose #2.*garbled.*Open/))
@@ -55,17 +55,17 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`the Board reports Markdown for a Markdown tracker on ${surface}`, async ($, on) => {
+  test(`the List reports Markdown for a Markdown tracker on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
 
     expect(await texts(ui)).toContain('Backend: Markdown')
     await ui.unmount()
   })
 
-  test(`the Board reports GitHub when the tracker doc names it on ${surface}`, async ($, on) => {
+  test(`the List reports GitHub when the tracker doc names it on ${surface}`, async ($, on) => {
     serveFiles(on, { 'docs/agents/issue-tracker.md': '# Issue tracker: GitHub\n\nUse `gh issue`.\n' })
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
 
     expect(await texts(ui)).toContain('Backend: GitHub')
     await ui.unmount()
@@ -75,15 +75,15 @@ for (const surface of SURFACES) {
     serveFiles(on, {
       '.scratch/loose/issues/01-both.md': '# 01: Both labels\n\nLabels: bug, wayfinder:research\nStatus: claimed\n',
     })
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
 
     expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Research.*loose #1.*Both labels.*Claimed/))
     await ui.unmount()
   })
 
-  test(`one unreadable feature folder does not hide the rest of the Board on ${surface}`, async ($, on) => {
+  test(`one unreadable feature folder does not hide the rest of the List on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER, '.scratch/loose/issues')
-    const ui = await mountBoard($, surface)
+    const ui = await mountList($, surface)
     expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     expect(await texts(ui)).toContainEqual(expect.stringMatching(/Could not read.*loose/))
     await ui.unmount()

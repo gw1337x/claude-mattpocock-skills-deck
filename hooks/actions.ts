@@ -33,7 +33,7 @@ export const LADDER: Row[] = [
     name: 'Execute',
     skill: 'wayfinder',
     kinds: ['map'],
-    template: (ref, title) => about('wayfinder', ref, `Work the Map "${title}": take the next Claimable question.`),
+    template: (ref, title) => about('wayfinder', ref, `Work the Map "${title}": take the next Ready question.`),
   },
   {
     name: 'Execute',
@@ -162,7 +162,7 @@ export const HANDOFF_PROMPT = '/handoff'
 
 export const CONTINUE_PROMPT = 'Continue from this handoff file: '
 
-export const FIXATE_PROMPT =
-  'Fixate what we have settled: restate every question we have answered so far with its answer, ' +
+export const CONSOLIDATE_PROMPT =
+  'Consolidate what we have settled: restate every question we have answered so far with its answer, ' +
   'list any possible omissions, and then wait for me. Once I confirm, save them where they belong ' +
   '(the glossary, an ADR, the spec or the ticket).'

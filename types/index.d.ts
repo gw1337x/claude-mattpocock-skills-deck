@@ -13,7 +13,7 @@ export type Kind =
 
 export type TicketState = 'open' | 'closed'
 
-/** One Map, Spec or Ticket on the Board. */
+/** One Map, Spec or Ticket on the List. */
 export type BoardItem = {
   kind: Kind
   title: string
@@ -39,7 +39,7 @@ export type BoardItem = {
   url?: string
 }
 
-/** One row of the Env Check tab. */
+/** One row of the Checks tab. */
 export type Check = {
   id: string
   label: string
@@ -50,13 +50,13 @@ export type Check = {
   fix: string
 }
 
-export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'claimable'
+export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'ready'
 export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 
-/** What the person has chosen on the Board; kept in session state. */
+/** What the person has chosen on the List; kept in session state. */
 export type BoardView = { filter: BoardFilter; sort: BoardSort; chips: string[] }
 
-/** The Board as last read from the tracker; the Pane (and later the Capsule band) read this one copy. */
+/** The List as last read from the tracker; the Pane (and later the Capsule band) read this one copy. */
 export type BoardSnapshot = {
   items: BoardItem[]
   readAt: number
@@ -69,13 +69,13 @@ declare module 'claude-code' {
     'mattpocock-skills-deck': {
       boardView: BoardView
       snapshot: BoardSnapshot
-      /** Path of the Container whose detail the Pane shows; absent or null shows the Board. */
+      /** Path of the Container whose detail the Pane shows; absent or null shows the List. */
       detail: string | null
-      /** Which Pane tab is shown; absent means the Board. */
-      tab: 'board' | 'skills' | 'prs' | 'env' | 'palette'
+      /** Which Pane tab is shown; absent means the List. */
+      tab: 'list' | 'skills' | 'prs' | 'checks' | 'palette'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
-      /** The Env Check rows as last run; absent means the tab runs the checks when drawn. */
+      /** The Checks rows as last run; absent means the tab runs the checks when drawn. */
       envChecks: Check[] | null
       /** Why the last Palette save did not happen; absent or null shows nothing. */
       paletteNote: string | null

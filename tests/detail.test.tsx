@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { listCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -107,14 +107,14 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`going back returns to the Board with filters kept on ${surface}`, async ($, on) => {
+  test(`going back returns to the List with filters kept on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
     await ui.press({ key: 'filter:open' })
     await ui.press({ key: `detail:${MAP}` })
     await ui.press({ key: 'back' })
-    expect(await isOn(ui, 'tab:board')).toBe(true)
+    expect(await isOn(ui, 'tab:list')).toBe(true)
     expect(await isOn(ui, 'filter:open')).toBe(true)
     await ui.unmount()
   })

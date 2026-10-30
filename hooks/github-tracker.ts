@@ -17,7 +17,7 @@ export class GhError extends Error {
   }
 }
 
-const ENV_CHECK = 'Open Env Check to fix it.'
+const ENV_CHECK = 'Open Checks to fix it.'
 
 const describeFailure = (stderr: string): GhError => {
   if (/auth login|not logged in|authentication|HTTP 401|gh_token/i.test(stderr)) {
@@ -79,7 +79,7 @@ const numbersOf = (value: unknown): number[] =>
 
 const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
-/** Every issue in the repo as Board items; a Container's sub-issues carry its path as `parent`. */
+/** Every issue in the repo as List items; a Container's sub-issues carry its path as `parent`. */
 export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
   const listed = JSON.parse(
     await runGh(run, [

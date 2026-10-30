@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { listCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -45,11 +45,11 @@ const WITH_DONE = {
 }
 
 for (const surface of SURFACES) {
-  test(`counts match the hand-computed Claimable, Blocked and closed numbers on ${surface}`, async ($, on) => {
+  test(`counts match the hand-computed Ready, Blocked and closed numbers on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
-    expect(await boardCounts(ui)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
+    expect(await listCounts(ui)).toEqual({ ready: 3, blocked: 1, closed: 1 })
     await ui.unmount()
   })
 
@@ -59,7 +59,7 @@ for (const surface of SURFACES) {
     })
     const ui = await mount($, surface)
 
-    expect(await boardCounts(ui)).toEqual({ claimable: 0, blocked: 1, closed: 0 })
+    expect(await listCounts(ui)).toEqual({ ready: 0, blocked: 1, closed: 0 })
     await ui.unmount()
   })
 
@@ -70,7 +70,7 @@ for (const surface of SURFACES) {
     })
     const ui = await mount($, surface)
 
-    expect(await boardCounts(ui)).toEqual({ claimable: 1, blocked: 0, closed: 1 })
+    expect(await listCounts(ui)).toEqual({ ready: 1, blocked: 0, closed: 1 })
     await ui.unmount()
   })
 
@@ -84,17 +84,17 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`the Claimable filter leaves out claimed, blocked, closed and unreadable tickets on ${surface}`, async ($, on) => {
+  test(`the Ready filter leaves out claimed, blocked, closed and unreadable tickets on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'filter:claimable' })
+    await ui.press({ key: 'filter:ready' })
 
     expect(new Set(await shown(ui))).toEqual(new Set(['Login crashes', 'card form']))
     await ui.unmount()
   })
 
-  test(`the Open and Closed filters split the Board on ${surface}`, async ($, on) => {
+  test(`the Open and Closed filters split the List on ${surface}`, async ($, on) => {
     serveFiles(on, WITH_DONE)
     const ui = await mount($, surface)
 

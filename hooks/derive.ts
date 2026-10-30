@@ -1,12 +1,12 @@
 import type { BoardFilter, BoardItem, BoardSort, BoardView } from '../types'
 
-export type Counts = { claimable: number; blocked: number; closed: number; needsTriage: number; bugs: number }
+export type Counts = { ready: number; blocked: number; closed: number; needsTriage: number; bugs: number }
 
 export type Derived = {
   /** Paths of open Tickets waiting on a Ticket that is open or cannot be found. */
   blocked: Set<string>
   /** Paths of open Tickets that are not Blocked and that nobody has claimed. */
-  claimable: Set<string>
+  ready: Set<string>
   counts: Counts
 }
 
@@ -14,12 +14,12 @@ export const DEFAULT_VIEW: BoardView = { filter: 'all', sort: 'updated', chips: 
 
 const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
-/** Blocked, Claimable and the counts over every Ticket; Containers are not Tickets. */
+/** Blocked, Ready and the counts over every Ticket; Containers are not Tickets. */
 export const derive = (items: BoardItem[]): Derived => {
   const tickets = items.filter(item => !isContainer(item))
   const byRef = new Map(tickets.map(item => [`${item.feature}/${item.number}`, item]))
   const blocked = new Set<string>()
-  const claimable = new Set<string>()
+  const ready = new Set<string>()
   let closed = 0
   let needsTriage = 0
   let bugs = 0
@@ -38,9 +38,9 @@ export const derive = (items: BoardItem[]): Derived => {
     if (ticket.labels.includes('needs-triage')) needsTriage += 1
     if (ticket.kind === 'bug' || ticket.labels.includes('bug')) bugs += 1
     if (waits) blocked.add(ticket.path)
-    else if (!ticket.claimed) claimable.add(ticket.path)
+    else if (!ticket.claimed) ready.add(ticket.path)
   }
-  return { blocked, claimable, counts: { claimable: claimable.size, blocked: blocked.size, closed, needsTriage, bugs } }
+  return { blocked, ready, counts: { ready: ready.size, blocked: blocked.size, closed, needsTriage, bugs } }
 }
 
 const SORTS: Record<BoardSort, (a: BoardItem, b: BoardItem) => number> = {
@@ -57,8 +57,8 @@ const inFilter = (filter: BoardFilter, item: BoardItem, derived: Derived): boole
   switch (filter) {
     case 'blocked':
       return derived.blocked.has(item.path)
-    case 'claimable':
-      return derived.claimable.has(item.path)
+    case 'ready':
+      return derived.ready.has(item.path)
     case 'open':
       return item.state === 'open'
     case 'closed':
@@ -68,13 +68,13 @@ const inFilter = (filter: BoardFilter, item: BoardItem, derived: Derived): boole
   }
 }
 
-/** The cards the Board shows for a view. */
+/** The cards the List shows for a view. */
 export const visibleItems = (items: BoardItem[], derived: Derived, view: BoardView): BoardItem[] =>
   items
     .filter(item => inFilter(view.filter, item, derived))
     .filter(item => view.chips.every(chip => item.labels.includes(chip)))
     .sort(SORTS[view.sort])
 
-/** Every label on the Board, for the chips. */
+/** Every label on the List, for the chips. */
 export const allLabels = (items: BoardItem[]): string[] =>
   [...new Set(items.flatMap(item => item.labels))].sort((a, b) => a.localeCompare(b))

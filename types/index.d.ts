@@ -27,7 +27,9 @@ export type BoardItem = {
   path: string
   /** Numbers of the tickets (in the same feature) this one waits on. */
   blockedBy: number[]
-  /** True when somebody has claimed it (`Status: claimed` on Markdown). */
+  /** Who the ticket is assigned to: `DSH-ASSIGNEES` on Markdown, the assignees' logins on GitHub. */
+  assignees: string[]
+  /** True when somebody has claimed it: an assignee, or `Status: claimed` on Markdown. */
   claimed: boolean
   /** Last-modified time of the file, in ms; 0 when unknown. */
   updated: number

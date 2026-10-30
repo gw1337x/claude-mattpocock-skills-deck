@@ -5,8 +5,11 @@ export type TicketDetail = { body: string; comments: string[] }
 
 const COMMENTS_LINE = /^## Comments[ \t]*\r?$/m
 
-/** The title is drawn in the header, so the body leaves out its `# ` line. */
-const withoutTitle = (text: string): string => text.replace(/^\s*# .*\r?\n/, '').trim()
+/** md-v1's hidden header lines, legacy `parentKey`/`created` ones included, which the detail view does not draw. */
+const HEADER_LINES = /^<!--\s*(?:DSH-[A-Z-]+|parentKey|created):.*-->[ \t]*\r?\n?/gm
+
+/** The title is drawn in the header, so the body leaves out its `# ` line and md-v1's hidden header lines. */
+const withoutTitle = (text: string): string => text.replace(HEADER_LINES, '').replace(/^\s*# .*\r?\n/, '').trim()
 
 /** Splits the text at `## Comments`: before it, the section's lines, and whatever follows the section's next `## ` heading. */
 const splitAtComments = (text: string): { before: string; section: string; after: string } | null => {

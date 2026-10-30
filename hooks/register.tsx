@@ -37,16 +37,19 @@ import {
 } from './github-tracker'
 import {
   COLORS_FILE,
+  COLORS_YAML_FILE,
   colorOf,
   parseColor,
   readGithubColors,
   readMarkdownColors,
   saveGithubColor,
   withSavedColor,
+  withSavedYamlColor,
   type Colors,
 } from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
+import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
@@ -155,13 +158,19 @@ const readRoute = async ($: Engine): Promise<RouteEntry[]> => {
   }
 }
 
-/** The person's override for this repo if there is one, else what the tracker doc names, else Markdown. */
+/** The person's override for this repo if there is one, else `workspace.yaml`, else what the tracker doc names, else Markdown. */
 const resolveBackend = async ($: Engine): Promise<Backend> => {
   try {
     const stored = await $.store.get(await overrideKey($))
     if (stored === 'github' || stored === 'markdown') return stored
   } catch {
     // No store: detection decides.
+  }
+  try {
+    const workspace = readWorkspace(await $.fs.read(WORKSPACE_FILE)).backend
+    if (workspace !== null) return workspace
+  } catch {
+    // No workspace.yaml: the tracker doc decides.
   }
   try {
     return detectBackend(await $.fs.read(TRACKER_DOC)) ?? 'markdown'
@@ -723,8 +732,13 @@ export const register: Register = on => {
           if (backend === 'github') {
             await saveGithubColor(ghRun($), label, hex)
           } else {
-            const existing = await $.fs.read(COLORS_FILE).catch(() => null)
-            await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
+            const yaml = await $.fs.read(COLORS_YAML_FILE).catch(() => null)
+            if (yaml !== null) {
+              await $.fs.write(COLORS_YAML_FILE, withSavedYamlColor(yaml, label, hex))
+            } else {
+              const existing = await $.fs.read(COLORS_FILE).catch(() => null)
+              await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
+            }
           }
           await $.state.set(PALETTE_NOTE, null)
         } catch (error) {

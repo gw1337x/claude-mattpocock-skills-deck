@@ -60,7 +60,7 @@ type Issue = {
   title: string
   state: string
   labels?: { name: string }[]
-  assignees?: unknown[]
+  assignees?: { login?: string }[]
   updatedAt?: string
   url?: string
   body?: string
@@ -100,6 +100,7 @@ export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
       state: issue.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open',
       path: githubPath(issue.number),
       blockedBy: bodyBlockers(body),
+      assignees: (issue.assignees ?? []).map(assignee => assignee.login ?? ''),
       claimed: (issue.assignees ?? []).length > 0,
       updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
       parent: null,

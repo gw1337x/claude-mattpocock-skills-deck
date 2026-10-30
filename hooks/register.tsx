@@ -409,7 +409,7 @@ export const register: Register = on => {
     const latest = mine[0]
 
     return (
-      <Box flexDirection="column" flexShrink={0}>
+      <Box flexDirection="column" flexShrink={0} marginTop={1}>
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
           <Button
             key="count:claimable"

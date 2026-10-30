@@ -205,7 +205,12 @@ export const register: Register = on => {
           await postGithubComment(ghRun($), item.number ?? 0, comment)
         } catch (error) {
           if (!(error instanceof GhError)) throw error
-          await $.state.set(SNAPSHOT, { items: [], readAt: await $.clock.now(), error: error.message })
+          const previous = (await $.state.get(SNAPSHOT)).value
+          await $.state.set(SNAPSHOT, {
+            items: previous?.items ?? [],
+            readAt: previous?.readAt ?? (await $.clock.now()),
+            error: error.message,
+          })
           return
         }
       } else {

@@ -23,7 +23,7 @@ const describeFailure = (stderr: string): GhError => {
   if (/auth login|not logged in|authentication|HTTP 401|gh_token/i.test(stderr)) {
     return new GhError('not-logged-in', `gh is not logged in to GitHub. ${ENV_CHECK}`)
   }
-  if (/rate limit/i.test(stderr)) {
+  if (/rate limit|HTTP 429/i.test(stderr)) {
     return new GhError('rate-limit', `GitHub rate limit reached. Wait a few minutes, then Refresh. ${ENV_CHECK}`)
   }
   const reason = stderr.trim().split(/\r?\n/)[0] || 'unknown error'

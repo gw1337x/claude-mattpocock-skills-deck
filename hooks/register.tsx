@@ -26,6 +26,7 @@ import {
 import { readMarkdownItems } from './markdown-tracker'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { appendComment, readTicketDetail } from './ticket'
+import { ago, itemFor, othersLine, ownRoute, prune, touchOf, type RouteEntry } from './work-route'
 
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
 type Engine = Parameters<Hook<'session.start'>>[0]
@@ -45,6 +46,7 @@ const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
+const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 
 const TRACKER_DOC = 'docs/agents/issue-tracker.md'
 
@@ -56,7 +58,27 @@ const repoKey = async ($: Engine): Promise<string> => {
   }
 }
 
+/** This session's id; the Work Route falls back to one shared name when the engine cannot say. */
+const sessionId = async ($: Engine): Promise<string> => {
+  try {
+    return await $.session.id()
+  } catch {
+    return 'default'
+  }
+}
+
 const overrideKey = async ($: Engine) => `backend:${await repoKey($)}`
+const routeKey = async ($: Engine) => `route:${await repoKey($)}`
+
+/** Every session's touches in this repo; an unreadable store is an empty route. */
+const readRoute = async ($: Engine): Promise<RouteEntry[]> => {
+  try {
+    const stored = await $.store.get(await routeKey($))
+    return Array.isArray(stored) ? (stored as RouteEntry[]) : []
+  } catch {
+    return []
+  }
+}
 
 /** The person's override for this repo if there is one, else what the tracker doc names, else Markdown. */
 const resolveBackend = async ($: Engine): Promise<Backend> => {
@@ -137,6 +159,25 @@ const readSkillFile = async ($: Engine, name: string): Promise<string | null> =>
     }
   }
   return null
+}
+
+/** Notes a Ticket the AI just touched in the cross-session store, dropping entries past the purge window. */
+const recordTouch = async ($: Engine, call: Parameters<typeof touchOf>[0]) => {
+  const touch = touchOf(call)
+  if (!touch) return
+  const now = await $.clock.now()
+  const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
+  const item = itemFor(touch, snapshot.items)
+  const entry: RouteEntry = {
+    ticket: touch.ticket,
+    path: item?.path ?? null,
+    title: item?.title ?? `Ticket #${touch.ticket}`,
+    action: touch.action,
+    time: now,
+    session: await sessionId($),
+  }
+  await $.store.set(await routeKey($), [...prune(await readRoute($), now), entry])
+  $.ui.invalidate('ui.render')
 }
 
 const marked = (active: boolean, label: string) => (active ? `[${label}]` : label)
@@ -226,6 +267,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('tool.call', async ($, e, next) => {
+    const result = await next(e)
+    if (!result.deny) {
+      try {
+        await recordTouch($, e)
+      } catch {
+        // Noting a touch must never fail the AI's call.
+      }
+    }
+    return result
+  })
+
   on('turn.complete', async ($, e, next) => {
     await refresh($)
 
@@ -255,6 +308,13 @@ export const register: Register = on => {
     const menuOpen = (await $.state.get(SKILLS_MENU)).value ?? false
     const loaded = menuOpen ? await loadedSkills($) : []
     const installed = installedMattSkills(loaded ?? [])
+    const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
+    const now = await $.clock.now()
+    const entries = await readRoute($)
+    const session = await sessionId($)
+    const mine = ownRoute(entries, session, now)
+    const others = othersLine(entries, session, now)
+    const latest = mine[0]
 
     return (
       <Box flexDirection="column">
@@ -284,7 +344,30 @@ export const register: Register = on => {
             label={marked(menuOpen, 'Skills')}
             onPress={() => $.state.set(SKILLS_MENU, !menuOpen)}
           />
+          <Button
+            key="route"
+            label={marked(routeOpen, latest ? `Work Route #${latest.ticket}` : 'Work Route')}
+            onPress={() => $.state.set(ROUTE_OPEN, !routeOpen)}
+          />
         </Box>
+        {routeOpen && (
+          <Box flexDirection="column">
+            {mine.length === 0 && <Text dimColor>No Tickets touched in this session yet.</Text>}
+            {mine.map((entry, index) => (
+              <Button
+                key={`route:${index}`}
+                label={`#${entry.ticket} ${entry.title} · ${entry.action} · ${ago(entry.time, now)}`}
+                onPress={async () => {
+                  if (entry.path === null) return
+                  await $.state.set(TAB, 'board')
+                  await $.state.set(DETAIL, entry.path)
+                  await $.ui.open({ id: PANE, title: PANE_TITLE })
+                }}
+              />
+            ))}
+            {others && <Text>{others}</Text>}
+          </Box>
+        )}
         {menuOpen && (
           <Box>
             {loaded === null && <Text>Could not read the installed skills.</Text>}

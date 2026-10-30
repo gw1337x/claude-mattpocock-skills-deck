@@ -66,6 +66,8 @@ declare module 'claude-code' {
       skillDetail: string | null
       /** True while the Capsule band's Skills menu is open. */
       skillsMenu: boolean
+      /** True while the Capsule band's Work Route list is open. */
+      routeOpen: boolean
     }
   }
 }

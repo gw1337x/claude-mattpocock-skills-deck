@@ -410,7 +410,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" flexShrink={0} marginTop={1}>
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+        <Box flexDirection="row" flexWrap="wrap">
           <Button
             key="count:claimable"
             label={`Claimable ${claimable}`}
@@ -429,7 +429,7 @@ export const register: Register = on => {
           <Button key="new" label="New" onPress={() => startNew($)} />
           <Button key="bug" label="+Bug" onPress={() => startBug($)} />
           <Button key="handoff" label="Handoff" onPress={() => fillPrompt($, HANDOFF_PROMPT)} />
-          <Button key="continue" label="Continue from handoff" onPress={() => fillPrompt($, CONTINUE_PROMPT)} />
+          <Button key="continue" label="Continue" onPress={() => fillPrompt($, CONTINUE_PROMPT)} />
           <Button key="fixate" label="Fixate" onPress={() => fillPrompt($, FIXATE_PROMPT)} />
           <Button
             key="skills-menu"
@@ -461,7 +461,7 @@ export const register: Register = on => {
           </Box>
         )}
         {menuOpen && (
-          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+          <Box flexDirection="row" flexWrap="wrap">
             {loaded === null && <Text>Could not read the installed skills.</Text>}
             {loaded !== null && installed.size === 0 && <Text dimColor>No Matt skills installed.</Text>}
             {CATALOGUE.filter(skill => installed.has(skill.name)).map(skill => (

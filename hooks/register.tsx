@@ -229,12 +229,12 @@ export const register: Register = on => {
                 onPress={() => showDetail(item.path)}
               />
             ) : (
-              <Text dimColor>{`#${number} (not found)`}</Text>
+              <Text key={`missing:${number}`} dimColor>{`#${number} (not found)`}</Text>
             ),
           )}
           <Text bold>{`Comments (${comments.length})`}</Text>
-          {comments.map(comment => (
-            <Markdown text={comment} />
+          {comments.map((comment, index) => (
+            <Markdown key={`comment:${index}`} text={comment} />
           ))}
           {Input && backend === 'markdown' && !unreadable && (
             <Input

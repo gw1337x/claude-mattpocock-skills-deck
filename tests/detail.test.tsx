@@ -210,3 +210,26 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 }
+
+const MIXED = '.scratch/f/issues/03-c.md'
+
+for (const surface of SURFACES) {
+  test(`free-text comments show, and a new one lands inside a Comments section that is not last on ${surface}`, async ($, on) => {
+    const files = {
+      ...TICKETS,
+      [MIXED]: '# 03: Mixed\n\nStatus: ready-for-agent\n\n## Comments\n\nPlain old comment.\n\n## Notes\n\nKeep me.\n',
+    }
+    serveFiles(on, files)
+    const ui = (await mount($, surface)) as Typing
+
+    await ui.press({ key: `detail:${MIXED}` })
+    expect((await everything(ui)).join('\n')).toContain('Plain old comment.')
+    await ui.input({ key: 'comment', text: 'Added one.' })
+
+    const text = files[MIXED] ?? ''
+    expect(text.indexOf('Added one.')).toBeGreaterThan(text.indexOf('Plain old comment.'))
+    expect(text.indexOf('Added one.')).toBeLessThan(text.indexOf('## Notes'))
+    expect(text).toContain('Keep me.')
+    await ui.unmount()
+  })
+}

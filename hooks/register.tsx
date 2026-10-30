@@ -99,13 +99,13 @@ const refresh = async ($: Engine) => {
   }
 }
 
-/** Names of the skills Claude Code has loaded; empty when it cannot say. */
-const loadedSkills = async ($: Engine): Promise<string[]> => {
+/** Names of the skills Claude Code has loaded; null when it cannot say. */
+const loadedSkills = async ($: Engine): Promise<string[] | null> => {
   try {
     const usage = await $.session.usage({ breakdown: 'summary' })
     return usage.context.breakdown?.skills?.skillFrontmatter.map(skill => skill.name) ?? []
   } catch {
-    return []
+    return null
   }
 }
 
@@ -268,7 +268,8 @@ export const register: Register = on => {
     )
 
     if (tab === 'skills') {
-      const installed = installedMattSkills(await loadedSkills($))
+      const loaded = await loadedSkills($)
+      const installed = installedMattSkills(loaded ?? [])
       const skillName = (await $.state.get(SKILL_DETAIL)).value ?? null
       if (skillName !== null && installed.has(skillName)) {
         const text = await readSkillFile($, skillName)
@@ -283,6 +284,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {tabBar}
+          {loaded === null && <Text>Could not read the installed skills.</Text>}
           {GROUPS.map(group => (
             <Box key={`group:${group}`} flexDirection="column">
               <Text bold>{GROUP_NAMES[group]}</Text>

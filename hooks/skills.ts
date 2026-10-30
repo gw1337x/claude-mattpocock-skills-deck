@@ -68,13 +68,10 @@ export const CATALOGUE: MattSkill[] = [
   { name: 'writing-shape', group: 'in-progress', purpose: 'Shape raw material into an article.' },
 ]
 
-/** A plugin's skills may be loaded as `plugin:skill`; the part after the colon is the skill. */
-const bareName = (loaded: string): string => loaded.slice(loaded.lastIndexOf(':') + 1)
-
 /** The catalogue names among the skills Claude Code has loaded. Others are dropped. */
 export const installedMattSkills = (loaded: string[]): Set<string> => {
   const known = new Set(CATALOGUE.map(skill => skill.name))
-  return new Set(loaded.map(bareName).filter(name => known.has(name)))
+  return new Set(loaded.filter(name => known.has(name)))
 }
 
 /** Where a skill's SKILL.md may be, project before user. */

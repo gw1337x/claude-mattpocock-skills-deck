@@ -163,4 +163,26 @@ for (const surface of SURFACES) {
     expect(await keys(ui)).toContain('refresh')
     await ui.unmount()
   })
+
+  test(`a plugin skill named like a Matt skill is not taken for it on ${surface}`, async ($, on) => {
+    serveFiles(on, files())
+    serveSkills(on, ['otherplugin:tdd'])
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'tab:skills' })
+
+    expect(await keys(ui)).not.toContain('load:tdd')
+    await ui.unmount()
+  })
+
+  test(`a failed skill lookup says so instead of listing nothing installed on ${surface}`, async ($, on) => {
+    serveFiles(on, files())
+    on('session.usage', () => ({ deny: 'unavailable' }))
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'tab:skills' })
+
+    expect(await everything(ui)).toContain('Could not read the installed skills.')
+    await ui.unmount()
+  })
 }

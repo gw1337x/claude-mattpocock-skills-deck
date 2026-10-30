@@ -24,7 +24,7 @@ import {
   readGithubItems,
   type Run,
 } from './github-tracker'
-import { hasGithubRemote, readPrs } from './prs'
+import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { appendComment, readTicketDetail } from './ticket'
@@ -529,7 +529,7 @@ export const register: Register = on => {
     )
 
     if (tab === 'prs') {
-      let prs: Awaited<ReturnType<typeof readPrs>> = []
+      let prs: Pr[] = []
       let problem: string | null = null
       try {
         prs = await readPrs(ghRun($))

@@ -46,9 +46,9 @@ export const GITHUB_ISSUES: Issue[] = [
 
 /** Recorded `gh pr list --state all` JSON. */
 export const GITHUB_PRS = [
-  { number: 21, title: 'Add PDF renderer', state: 'OPEN', url: 'https://github.com/acme/shop/pull/21', isDraft: false, mergedAt: null },
-  { number: 19, title: 'Fix login crash', state: 'MERGED', url: 'https://github.com/acme/shop/pull/19', isDraft: false, mergedAt: '2026-01-02T00:00:00Z' },
-  { number: 17, title: 'Try dark mode', state: 'CLOSED', url: 'https://github.com/acme/shop/pull/17', isDraft: false, mergedAt: null },
+  { number: 21, title: 'Add PDF renderer', state: 'OPEN', url: 'https://github.com/acme/shop/pull/21' },
+  { number: 19, title: 'Fix login crash', state: 'MERGED', url: 'https://github.com/acme/shop/pull/19' },
+  { number: 17, title: 'Try dark mode', state: 'CLOSED', url: 'https://github.com/acme/shop/pull/17' },
 ]
 
 const SUB_ISSUES: Record<number, number[]> = { 1: [2, 3, 4], 5: [6, 7] }

@@ -4,10 +4,7 @@ export type PrState = 'open' | 'merged' | 'closed'
 
 export type Pr = { number: number; title: string; state: PrState; url: string }
 
-const stateOf = (state: string): PrState => {
-  const upper = state.toUpperCase()
-  return upper === 'MERGED' ? 'merged' : upper === 'CLOSED' ? 'closed' : 'open'
-}
+const STATES: Record<string, PrState> = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' }
 
 /** True when `git remote -v` names GitHub; any failure to ask means no remote. */
 export const hasGithubRemote = async (run: Run): Promise<boolean> => {
@@ -23,7 +20,6 @@ export const hasGithubRemote = async (run: Run): Promise<boolean> => {
 export const readPrs = async (run: Run): Promise<Pr[]> => {
   const listed = (await ghJson(run, [
     'pr', 'list', '--state', 'all', '--limit', '100', '--json', 'number,title,state,url',
-  ])) as { number: number; title: string; state: string; url: string }[]
-  return listed.map(pr => ({ number: pr.number, title: pr.title, state: stateOf(pr.state), url: pr.url }))
+  ])) as (Omit<Pr, 'state'> & { state: string })[]
+  return listed.map(pr => ({ ...pr, state: STATES[pr.state.toUpperCase()] ?? 'open' }))
 }
-

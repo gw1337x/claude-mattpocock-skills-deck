@@ -409,8 +409,8 @@ export const register: Register = on => {
     const latest = mine[0]
 
     return (
-      <Box flexDirection="column">
-        <Box>
+      <Box flexDirection="column" flexShrink={0}>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
           <Button
             key="count:claimable"
             label={`Claimable ${claimable}`}
@@ -461,7 +461,7 @@ export const register: Register = on => {
           </Box>
         )}
         {menuOpen && (
-          <Box>
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
             {loaded === null && <Text>Could not read the installed skills.</Text>}
             {loaded !== null && installed.size === 0 && <Text dimColor>No Matt skills installed.</Text>}
             {CATALOGUE.filter(skill => installed.has(skill.name)).map(skill => (

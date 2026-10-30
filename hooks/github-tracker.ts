@@ -41,6 +41,9 @@ const gh = async (run: Run, argv: string[]): Promise<string> => {
   return result.stdout
 }
 
+/** A `gh` call whose output is JSON; throws a GhError when it fails. */
+export const ghJson = async (run: Run, argv: string[]): Promise<unknown> => JSON.parse(await gh(run, argv))
+
 /** A secondary lookup: any failure but a rate limit just means "no answer". */
 const ghOptional = async (run: Run, argv: string[]): Promise<unknown> => {
   try {

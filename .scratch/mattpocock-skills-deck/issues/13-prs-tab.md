@@ -4,7 +4,7 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] PRs render from recorded `gh pr list` JSON with their state
-- [ ] The tab is hidden without a GitHub remote, and shown on a Markdown-tracker repo that has one
+- [x] PRs render from recorded `gh pr list` JSON with their state
+- [x] The tab is hidden without a GitHub remote, and shown on a Markdown-tracker repo that has one

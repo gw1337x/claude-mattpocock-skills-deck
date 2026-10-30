@@ -44,6 +44,13 @@ export const GITHUB_ISSUES: Issue[] = [
   issue(8, 'Login crashes on empty password', { labels: labels('bug', 'needs-triage') }),
 ]
 
+/** Recorded `gh pr list --state all` JSON. */
+export const GITHUB_PRS = [
+  { number: 21, title: 'Add PDF renderer', state: 'OPEN', url: 'https://github.com/acme/shop/pull/21', isDraft: false, mergedAt: null },
+  { number: 19, title: 'Fix login crash', state: 'MERGED', url: 'https://github.com/acme/shop/pull/19', isDraft: false, mergedAt: '2026-01-02T00:00:00Z' },
+  { number: 17, title: 'Try dark mode', state: 'CLOSED', url: 'https://github.com/acme/shop/pull/17', isDraft: false, mergedAt: null },
+]
+
 const SUB_ISSUES: Record<number, number[]> = { 1: [2, 3, 4], 5: [6, 7] }
 /** Native issue dependencies; #3 declares its blocker in the body instead. */
 const BLOCKED_BY: Record<number, number[]> = { 7: [6] }
@@ -99,6 +106,7 @@ export const serveGh = (
       const names = options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug']
       return reply(JSON.stringify(names.map(name => ({ name }))))
     }
+    if (line.startsWith('pr list')) return reply(JSON.stringify(GITHUB_PRS))
     if (line.startsWith('issue list')) return reply(JSON.stringify(GITHUB_ISSUES))
     const api = /^api repos\/\{owner\}\/\{repo\}\/issues\/(\d+)\/(sub_issues|dependencies\/blocked_by)$/.exec(line)
     if (api) {

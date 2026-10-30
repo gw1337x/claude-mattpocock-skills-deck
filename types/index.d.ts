@@ -63,7 +63,7 @@ declare module 'claude-code' {
       /** Path of the Container whose detail the Pane shows; absent or null shows the Board. */
       detail: string | null
       /** Which Pane tab is shown; absent means the Board. */
-      tab: 'board' | 'skills' | 'env'
+      tab: 'board' | 'skills' | 'prs' | 'env'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
       /** The Env Check rows as last run; absent means the tab runs the checks when drawn. */

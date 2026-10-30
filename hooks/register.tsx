@@ -24,6 +24,7 @@ import {
   readGithubItems,
   type Run,
 } from './github-tracker'
+import { hasGithubRemote, readPrs } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { appendComment, readTicketDetail } from './ticket'
@@ -508,11 +509,14 @@ export const register: Register = on => {
     }
 
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
-    const tab = (await $.state.get(TAB)).value ?? 'board'
+    const prsShown = await hasGithubRemote(ghRun($))
+    const stored = (await $.state.get(TAB)).value ?? 'board'
+    const tab = stored === 'prs' && !prsShown ? 'board' : stored
     const tabBar = (
       <Box>
         <Button key="tab:board" label={marked(tab === 'board', 'Board')} onPress={() => $.state.set(TAB, 'board')} />
         <Button key="tab:skills" label={marked(tab === 'skills', 'Skills')} onPress={() => $.state.set(TAB, 'skills')} />
+        {prsShown && <Button key="tab:prs" label={marked(tab === 'prs', 'PRs')} onPress={() => $.state.set(TAB, 'prs')} />}
         <Button
           key="tab:env"
           label={marked(tab === 'env', 'Env Check')}
@@ -523,6 +527,31 @@ export const register: Register = on => {
         />
       </Box>
     )
+
+    if (tab === 'prs') {
+      let prs: Awaited<ReturnType<typeof readPrs>> = []
+      let problem: string | null = null
+      try {
+        prs = await readPrs(ghRun($))
+      } catch (error) {
+        if (!(error instanceof GhError)) throw error
+        problem = error.message
+      }
+      return (
+        <Box flexDirection="column">
+          {tabBar}
+          <Text bold>{`PRs (${prs.length})`}</Text>
+          {problem !== null && <Text>{problem}</Text>}
+          {problem === null && prs.length === 0 && <Text dimColor>No pull requests.</Text>}
+          {prs.map(pr => (
+            <Box key={`pr:${pr.number}`} flexDirection="column">
+              <Text>{`#${pr.number}  ${pr.title}  ${pr.state}`}</Text>
+              <Link href={pr.url}>Open</Link>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
 
     if (tab === 'env') {
       // Drawing is pure: before the first run (the Pane opened on this tab) check live, store nothing.

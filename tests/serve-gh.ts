@@ -60,7 +60,17 @@ export type GhServer = {
 /** Answers `$.process.run` the way `gh` would for the GitHub fixture. */
 export const serveGh = (
   on: On,
-  options: { fail?: GhFailure; permission?: string; comments?: Record<number, string[]> } = {},
+  options: {
+    fail?: GhFailure
+    permission?: string
+    comments?: Record<number, string[]>
+    /** Labels the repo has; every workflow label unless given. */
+    labels?: string[]
+    /** What `git remote -v` prints; a GitHub remote unless given. */
+    remote?: string
+    /** `gh auth status` fails while everything else works. */
+    loggedOut?: boolean
+  } = {},
 ): GhServer => {
   const server: GhServer = { calls: [], comments: { ...options.comments } }
   const reply = (stdout: string, exitCode = 0, stderr = '') => ({
@@ -69,6 +79,9 @@ export const serveGh = (
 
   on('process.run', (_, e) => {
     const argv = [...e.argv]
+    if (argv[0] === 'git' && argv[1] === 'remote') {
+      return reply(options.remote ?? 'origin\thttps://github.com/acme/shop.git (fetch)\n')
+    }
     if (argv[0] !== 'gh') return reply('', 1, `unexpected command ${argv.join(' ')}`)
     server.calls.push(argv.slice(1).join(' '))
 
@@ -78,6 +91,14 @@ export const serveGh = (
     if (options.fail === 'other') return reply('', 1, 'could not resolve host')
 
     const line = argv.slice(1).join(' ')
+    if (line === '--version') return reply('gh version 2.60.0\n')
+    if (line === 'auth status') {
+      return options.loggedOut ? reply('', 1, 'You are not logged into any GitHub hosts. Run gh auth login') : reply('Logged in\n')
+    }
+    if (line.startsWith('label list')) {
+      const names = options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug']
+      return reply(JSON.stringify(names.map(name => ({ name }))))
+    }
     if (line.startsWith('issue list')) return reply(JSON.stringify(GITHUB_ISSUES))
     const api = /^api repos\/\{owner\}\/\{repo\}\/issues\/(\d+)\/(sub_issues|dependencies\/blocked_by)$/.exec(line)
     if (api) {

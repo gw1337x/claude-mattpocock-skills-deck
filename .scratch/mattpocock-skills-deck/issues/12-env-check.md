@@ -9,7 +9,7 @@ Checks that don't apply are hidden. Each failing row has a button that fills a f
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Each check passes and fails against matching fixtures
 - [ ] The score counts only checks that apply

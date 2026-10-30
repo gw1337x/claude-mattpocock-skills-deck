@@ -15,6 +15,7 @@ import {
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { allLabels, DEFAULT_VIEW, derive, visibleItems } from './derive'
+import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
   GhError,
@@ -83,10 +84,9 @@ const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
 const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
+const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
-
-const TRACKER_DOC = 'docs/agents/issue-tracker.md'
 
 const repoKey = async ($: Engine): Promise<string> => {
   try {
@@ -180,6 +180,17 @@ const loadedSkills = async ($: Engine): Promise<string[] | null> => {
     return null
   }
 }
+
+/** Runs the Env Check now for this project's Backend; nothing is stored. */
+const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> =>
+  buildChecks(
+    backend,
+    await gatherEnv(backend, {
+      run: ghRun($),
+      exists: path => $.fs.exists(path),
+      loaded: () => loadedSkills($),
+    }),
+  )
 
 /** The text of a skill's SKILL.md, or null when it is in none of the usual places. */
 const readSkillFile = async ($: Engine, name: string): Promise<string | null> => {
@@ -496,13 +507,50 @@ export const register: Register = on => {
       await refresh($)
     }
 
+    const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
     const tab = (await $.state.get(TAB)).value ?? 'board'
     const tabBar = (
       <Box>
         <Button key="tab:board" label={marked(tab === 'board', 'Board')} onPress={() => $.state.set(TAB, 'board')} />
         <Button key="tab:skills" label={marked(tab === 'skills', 'Skills')} onPress={() => $.state.set(TAB, 'skills')} />
+        <Button
+          key="tab:env"
+          label={marked(tab === 'env', 'Env Check')}
+          onPress={async () => {
+            await recheck()
+            await $.state.set(TAB, 'env')
+          }}
+        />
       </Box>
     )
+
+    if (tab === 'env') {
+      // Drawing is pure: before the first run (the Pane opened on this tab) check live, store nothing.
+      const checks = (await $.state.get(ENV_CHECKS)).value ?? (await runEnvChecks($, backend))
+      const { passed, total } = scoreOf(checks)
+      return (
+        <Box flexDirection="column">
+          {tabBar}
+          <Text bold>{`Env Check ${passed}/${total}`}</Text>
+          <Box>
+            <Button
+              key="recheck"
+              label="Re-check"
+              onPress={recheck}
+            />
+            {trackerDocMissing(checks) && (
+              <Button key="run-setup" label="Run setup" onPress={() => fillPrompt($, SETUP_PROMPT)} />
+            )}
+          </Box>
+          {checks.map(check => (
+            <Box key={`check:${check.id}`} flexDirection="column">
+              <Text>{`${check.ok ? '✓' : '✗'} ${check.label}${check.detail ? ` (${check.detail})` : ''}`}</Text>
+              {!check.ok && <Button key={`fix:${check.id}`} label="Fix" onPress={() => fillPrompt($, check.fix)} />}
+            </Box>
+          ))}
+        </Box>
+      )
+    }
 
     if (tab === 'skills') {
       const loaded = await loadedSkills($)

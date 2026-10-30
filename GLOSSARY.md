@@ -58,6 +58,9 @@ _Avoid_: Session chain
 The deck's side panel: Board, Skills, PRs and Env Check tabs.
 _Avoid_: Sidebar, right panel
 
+**Env Check**:
+The Pane tab that scores the project's setup as passed checks over applicable checks, one row per check, each failing row with a Fix button that fills a prompt.
+
 **Capsule band**:
 The row above the prompt with counts, the Work Route and quick Actions.
 _Avoid_: Status bar, capsule bar, dock

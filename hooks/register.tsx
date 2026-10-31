@@ -61,6 +61,21 @@ import {
   type Colors,
 } from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
+import {
+  addAll,
+  canCommit,
+  commit,
+  diffLines,
+  GitError,
+  inGitRepo,
+  readChanges,
+  readDiff,
+  stage,
+  unstage,
+  type Change,
+  type Changes,
+  type Section,
+} from './vc'
 import { initPublish, isGitRepo, PUBLISH_ERRORS, retryPush, validName, type PublishResult } from './publish'
 import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE, type Layout } from './workspace'
@@ -209,6 +224,9 @@ const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as con
 const SNAPSHOT = { plugin: 'mattpocock-skills-deck', key: 'snapshot' } as const
 const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
+const VC_DIFFS = { plugin: 'mattpocock-skills-deck', key: 'vcDiffs' } as const
+const VC_MESSAGE = { plugin: 'mattpocock-skills-deck', key: 'vcMessage' } as const
+const VC_NOTE = { plugin: 'mattpocock-skills-deck', key: 'vcNote' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
 const DIAGNOSTICS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'diagnosticsOpen' } as const
@@ -1573,8 +1591,9 @@ ${card.chain}`}</Text>
     }
     const backend = await resolveBackend($)
     const prsShown = await hasGithubRemote(ghRun($))
+    const vcShown = await inGitRepo(ghRun($))
     const stored = (await $.state.get(TAB)).value ?? 'list'
-    const tab = stored === 'prs' && !prsShown ? 'list' : stored
+    const tab = (stored === 'prs' && !prsShown) || (stored === 'vc' && !vcShown) ? 'list' : stored
     // Only the List and the Palette draw label colours.
     const colors: Colors = tab === 'list' || tab === 'palette' ? await readColors($, backend) : {}
     // A Container's Action depends on its children; every other item's on the ladder alone.
@@ -1717,9 +1736,10 @@ ${card.chain}`}</Text>
     }
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
-    const TABS: ['list' | 'skills' | 'prs' | 'checks', string, string][] = [
+    const TABS: ['list' | 'skills' | 'vc' | 'prs' | 'checks', string, string][] = [
       ['list', '☰', 'List'],
       ['skills', '◎', 'Skills'],
+      ...(vcShown ? [['vc', '⑂', 'Version control'] as ['vc', string, string]] : []),
       ...(prsShown ? [['prs', '⇄', 'Pull requests'] as ['prs', string, string]] : []),
       ['checks', '✲', 'Checks'],
     ]
@@ -1908,6 +1928,150 @@ ${card.chain}`}</Text>
               </Box>
             )
           })}
+        </Box>
+      )
+    }
+
+    if (tab === 'vc') {
+      const diffsOpen: string[] = (await $.state.get(VC_DIFFS)).value ?? []
+      const message: string = (await $.state.get(VC_MESSAGE)).value ?? ''
+      const note: string | null = (await $.state.get(VC_NOTE)).value ?? null
+      let changes: Changes = { staged: [], unstaged: [], untracked: [], conflicts: [] }
+      let problem: string | null = null
+      try {
+        changes = await readChanges(ghRun($))
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error
+        problem = error.message
+      }
+      const act = async (work: () => Promise<unknown>) => {
+        try {
+          await work()
+          await $.state.set(VC_NOTE, null)
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error
+          await $.state.set(VC_NOTE, error.message)
+        }
+      }
+      const toggleDiff = async (id: string) =>
+        $.state.set(VC_DIFFS, diffsOpen.includes(id) ? diffsOpen.filter(each => each !== id) : [...diffsOpen, id])
+      const diffOf = async (section: Section, path: string) => {
+        try {
+          return diffLines(await readDiff(ghRun($), section, path))
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error
+          return [{ kind: 'meta' as const, text: error.message }]
+        }
+      }
+      const DIFF_COLORS = { add: DSH.ok, remove: DSH.bad, hunk: DSH.link, meta: DSH.muted, context: undefined }
+      const row = async (section: Section, change: Change) => {
+        const id = `${section}:${change.path}`
+        const open = diffsOpen.includes(id)
+        const lines = open ? await diffOf(section, change.path) : []
+        return (
+          <Box key={`vc-row:${id}`} flexDirection="column">
+            <Box flexDirection="row" alignItems="center" columnGap="sm">
+              <Button key={`vc-diff:${id}`} label={`Diff ${change.path}`} onPress={() => toggleDiff(id)}>
+                <Text mono>{`${open ? '▾' : '▸'} ${change.path}`}</Text>
+              </Button>
+              <Text dimColor size="footnote">{change.from ? `${change.kind} from ${change.from}` : change.kind}</Text>
+              <Box flexGrow={1} />
+              {section === 'staged' ? (
+                <Button key={`vc-unstage:${change.path}`} label={`Unstage ${change.path}`} onPress={() => act(() => unstage(ghRun($), change.path))}>
+                  Unstage
+                </Button>
+              ) : (
+                <Button key={`vc-add:${section}:${change.path}`} label={`Add ${change.path}`} onPress={() => act(() => stage(ghRun($), change.path))}>
+                  Add
+                </Button>
+              )}
+            </Box>
+            {open && (
+              <Box flexDirection="column">
+                {lines.length === 0 && <Text dimColor>No diff to show.</Text>}
+                {lines.map((line, i) => (
+                  <Text key={`vc-line:${id}:${i}`} mono color={DIFF_COLORS[line.kind]}>
+                    {line.text}
+                  </Text>
+                ))}
+              </Box>
+            )}
+          </Box>
+        )
+      }
+      const untracked: Change[] = changes.untracked.map(path => ({ path, kind: 'added' as const }))
+      const sections: [Section, string, Change[]][] = [
+        ['staged', 'Staged', changes.staged],
+        ['unstaged', 'Unstaged', changes.unstaged],
+        ['untracked', 'Untracked', untracked],
+      ]
+      const everything = changes.staged.length + changes.unstaged.length + untracked.length + changes.conflicts.length
+      const committable = canCommit(changes, message)
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          {tabBar}
+          <Text bold>{`Changes (${everything})`}</Text>
+          {problem !== null && <Text>{problem}</Text>}
+          {note !== null && <Text color={DSH.bad}>{note}</Text>}
+          {problem === null && everything === 0 && <Text dimColor>No changes. The work tree is clean.</Text>}
+          {changes.conflicts.length > 0 && (
+            <Box flexDirection="column">
+              <Text color={DSH.bad} bold>{`Conflicts (${changes.conflicts.length})`}</Text>
+              {changes.conflicts.map(change => (
+                <Text key={`vc-conflict:${change.path}`} mono>{change.path}</Text>
+              ))}
+            </Box>
+          )}
+          {await Promise.all(
+            sections
+              .filter(([, , list]) => list.length > 0)
+              .map(async ([section, name, list]) => (
+                <Box key={`vc-section:${section}`} flexDirection="column">
+                  <Box flexDirection="row" alignItems="center" columnGap="sm">
+                    <Text bold>{`${name} (${list.length})`}</Text>
+                    <Box flexGrow={1} />
+                    {section !== 'staged' && (
+                      <Button key={`vc-add-all:${section}`} label="Add all" onPress={() => act(() => addAll(ghRun($)))}>
+                        Add all
+                      </Button>
+                    )}
+                  </Box>
+                  {await Promise.all(list.map(change => row(section, change)))}
+                </Box>
+              )),
+          )}
+          <Box flexDirection="column">
+            {Input && (
+              <Input
+                key="vc-message"
+                label="Commit message"
+                placeholder="Commit message"
+                value={message}
+                submitLabel="commit"
+                onInput={(value: string) => void $.state.set(VC_MESSAGE, value)}
+                onSubmit={(value: string) => $.state.set(VC_MESSAGE, value)}
+              />
+            )}
+            {committable ? (
+              <Button
+                key="vc-commit"
+                label={`Commit ${changes.staged.length} files`}
+                variant="primary"
+                onPress={() =>
+                  act(async () => {
+                    await commit(ghRun($), message)
+                    await $.state.set(VC_MESSAGE, '')
+                  })
+                }
+              >
+                {`Commit ${changes.staged.length} files`}
+              </Button>
+            ) : (
+              <Text key="vc-commit-off" dimColor>
+                {changes.staged.length === 0 ? 'Commit needs a staged file.' : 'Commit needs a message.'}
+              </Text>
+            )}
+          </Box>
         </Box>
       )
     }

@@ -1354,30 +1354,37 @@ export const register: Register = on => {
                   {content}
                 </Box>
               )
-              // A Button holds only strings and Text, so the row is a Box of fixed-width cells, and the Title cell is the click target.
+              // A Button holds only strings and Text, so the row is a Box of fixed-width cells, each cell a Button that opens the ticket.
+              const open = async () => {
+                if (found === undefined) return
+                await $.state.set(TAB, 'list')
+                await $.state.set(DETAIL, found.path)
+                await $.ui.open({ id: PANE, title: PANE_TITLE })
+              }
+              const press = (column: (typeof ROUTE_COLUMNS)[number][0], text: RenderChildren) =>
+                cell(
+                  column,
+                  <Button
+                    key={column === 'Title' ? `route:${index}` : `route:${index}:${column}:open`}
+                    label={
+                      column === 'Title'
+                        ? `route row ${who} · ${entry.ticketKey} · ${entry.title} · ${actionWord(entry.action)}${mark} · ${state} · ${when}`
+                        : `route ${column} ${entry.ticketKey}`
+                    }
+                    plain
+                    onPress={open}
+                  >
+                    {text}
+                  </Button>,
+                )
               return (
                 <Box key={`route-row:${index}`} flexDirection="row" columnGap="md">
-                  {cell('Session', <Text dimColor size="footnote">{who}</Text>)}
-                  {cell('Ticket', <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)}`}</Text>)}
-                  {cell(
-                    'Title',
-                    <Button
-                      key={`route:${index}`}
-                      label={`route row ${who} · ${entry.ticketKey} · ${entry.title} · ${actionWord(entry.action)}${mark} · ${state} · ${when}`}
-                      plain
-                      onPress={async () => {
-                        if (found === undefined) return
-                        await $.state.set(TAB, 'list')
-                        await $.state.set(DETAIL, found.path)
-                        await $.ui.open({ id: PANE, title: PANE_TITLE })
-                      }}
-                    >
-                      <Text>{entry.title}</Text>
-                    </Button>,
-                  )}
-                  {cell('Action', <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>)}
-                  {cell('State', <Text dimColor size="footnote">{state}</Text>)}
-                  {cell('When', <Text dimColor size="footnote">{when}</Text>)}
+                  {press('Session', <Text dimColor size="footnote">{who}</Text>)}
+                  {press('Ticket', <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)}`}</Text>)}
+                  {press('Title', <Text>{entry.title}</Text>)}
+                  {press('Action', <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>)}
+                  {press('State', <Text dimColor size="footnote">{state}</Text>)}
+                  {press('When', <Text dimColor size="footnote">{when}</Text>)}
                 </Box>
               )
             })}

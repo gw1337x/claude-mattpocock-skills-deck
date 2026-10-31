@@ -207,6 +207,12 @@ for (const surface of SURFACES) {
 
     await band.press({ key: 'route:0' })
     expect(opened).toContain('deck')
+    opened.length = 0
+    for (const column of ['Session', 'Ticket', 'Action', 'State', 'When']) {
+      await band.press({ key: `route:0:${column}:open` })
+      expect(opened).toEqual(['deck'])
+      opened.length = 0
+    }
     await band.unmount()
   })
 

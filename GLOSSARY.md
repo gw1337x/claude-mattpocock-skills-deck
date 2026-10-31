@@ -96,3 +96,7 @@ _Avoid_: Fixate, sediment, persist
 
 **Handoff**:
 The quick Action that writes the session's state to a file another session can continue from.
+
+**Templates file**:
+The file `docs/agents/templates.yaml` where the person replaces the text of any Action or quick-Action prompt, by DSH's keys (`diagnose`, `fix`, `discuss`, `research`, `prototype`, `takeover`, `supplement`, `execute`, `handoff1`, `handoff2`, `fixate`). Removing an entry restores DSH's text. `fixate` is the key for Consolidate; `handoff1` for Handoff; `handoff2` for Continue.
+_Avoid_: Settings, config

@@ -87,7 +87,9 @@ export const expandOverride = (text: string, values: Record<string, string>, not
       note(`templates file: ignored unknown placeholder "{${blank}}"`)
       return found
     }
-    return values[blank] ?? found
+    const value = values[blank]
+    if (value === undefined) note(`templates file: no value for "{${blank}}" here, left as written`)
+    return value ?? found
   })
 
 /** The prompt for a quick-Action: the override for `key` if there is one, else `fallback`. */

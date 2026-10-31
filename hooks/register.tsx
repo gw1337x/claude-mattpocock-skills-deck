@@ -33,7 +33,7 @@ import {
   statusOf,
   statusTag,
 } from './board-ui'
-import { allLabels, DEFAULT_VIEW, derive, progressText, visibleItems, type Derived } from './derive'
+import { allLabels, DEFAULT_VIEW, defaultDescending, derive, efforts, labelsByClicks, looseCount, progressText, visibleItems, type Derived } from './derive'
 import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
@@ -192,6 +192,7 @@ const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as c
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
 const ENTRY_FLOW = { plugin: 'mattpocock-skills-deck', key: 'entryFlow' } as const
+const LABELS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'labelsOpen' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -226,6 +227,30 @@ const sessionId = async ($: Engine): Promise<string> => {
 const overrideKey = async ($: Engine) => `backend:${await repoKey($)}`
 const collapsedKey = async ($: Engine) => `capsule-collapsed:${await repoKey($)}`
 const routeKey = async ($: Engine) => `route:${await repoKey($)}`
+const viewKey = async ($: Engine) => `view:${await repoKey($)}`
+
+/** The List's view: this session's, else the one remembered for the repo, else the default. */
+const readView = async ($: Engine): Promise<BoardView> => {
+  const live = (await $.state.get(BOARD_VIEW)).value
+  if (live) return live
+  try {
+    const stored = await $.store.get(await viewKey($))
+    if (stored && typeof stored === 'object') return { ...DEFAULT_VIEW, ...(stored as Partial<BoardView>) }
+  } catch {
+    // No store: the default view.
+  }
+  return DEFAULT_VIEW
+}
+
+/** Keeps the view for this session and, across sessions, for the repo. */
+const saveView = async ($: Engine, view: BoardView) => {
+  await $.state.set(BOARD_VIEW, view)
+  try {
+    await $.store.set(await viewKey($), view)
+  } catch {
+    // Without a store the choice lasts only this session.
+  }
+}
 
 /** Every session's route in this repo; an unreadable or older store is an empty route. */
 const readRoute = async ($: Engine, backend: Backend): Promise<RouteStore> => {
@@ -551,6 +576,9 @@ const SORTS: [BoardSort, string][] = [
   ['title', 'Title'],
 ]
 
+/** DSH shows this many label chips before "+N". */
+const LABELS_SHOWN = 4
+
 const PANE = 'deck'
 const PANE_TITLE = 'Skills Deck'
 
@@ -573,8 +601,7 @@ const closeEntry = async ($: Engine) => {
 
 /** Shows the List in the Pane with the view the person asked for. */
 const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) => {
-  const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
-  await $.state.set(BOARD_VIEW, { ...current, ...view })
+  await saveView($, { ...(await readView($)), ...view })
   await $.state.set(TAB, 'list')
   await $.state.set(DETAIL, null)
   await $.ui.open({ id: PANE, title: PANE_TITLE })
@@ -1117,17 +1144,20 @@ ${card.chain}`}</Text>
     const { Box, Button, Link, Markdown, Text } = elements
     // Every surface has the rest; only some have an `Input`.
     const Input = 'Input' in elements ? elements.Input : undefined
-    const view: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
-    const choose = async (change: Partial<BoardView>) => {
-      const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
-      await $.state.set(BOARD_VIEW, { ...current, ...change })
-    }
+    const view = await readView($)
+    const choose = async (change: Partial<BoardView>) => saveView($, { ...(await readView($)), ...change })
     const toggleChip = async (label: string) => {
-      const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
-      const chips = current.chips.includes(label)
-        ? current.chips.filter(chip => chip !== label)
-        : [...current.chips, label]
-      await choose({ chips })
+      const current = await readView($)
+      const picked = !current.chips.includes(label)
+      await choose({
+        chips: picked ? [...current.chips, label] : current.chips.filter(chip => chip !== label),
+        clicks: { ...current.clicks, [label]: (current.clicks[label] ?? 0) + 1 },
+      })
+    }
+    /** Picking a sort starts it in its own direction; picking the active one flips it. */
+    const chooseSort = async (sort: BoardSort) => {
+      const current = await readView($)
+      await choose({ sort, descending: current.sort === sort ? !current.descending : defaultDescending(sort) })
     }
     const showDetail = async (path: string | null) => {
       await $.state.set(DETAIL, path)
@@ -1246,39 +1276,78 @@ ${card.chain}`}</Text>
       await refresh($)
     }
 
+    const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
-    const TABS: ['list' | 'skills' | 'prs' | 'checks', string][] = [
-      ['list', '☰ List'],
-      ['skills', '◎ Skills'],
-      ...(prsShown ? [['prs', '⇄ PRs'] as ['prs', string]] : []),
-      ['checks', '✲ Checks'],
+    const TABS: ['list' | 'skills' | 'prs' | 'checks', string, string][] = [
+      ['list', '☰', 'List'],
+      ['skills', '◎', 'Skills'],
+      ...(prsShown ? [['prs', '⇄', 'Pull requests'] as ['prs', string, string]] : []),
+      ['checks', '✲', 'Checks'],
     ]
+    // Wide panes name their tabs; narrow ones keep the icon, and the longest names fold first.
+    const columns = e.props.bodyColumns
+    const tabWords = (name: string) => (columns >= 90 ? true : columns >= 64 ? name.length <= 6 : false)
+    const backendColor = backend === 'github' ? DSH.link : DSH.ok
+    const repo = await repoName($)
+    const root = await workspaceRoot($)
+    const cwd = await $.session.cwd().catch(() => root)
+    const trimmed = (path: string) => path.replace(/[\\/]+$/, '')
+    const inSubfolder = trimmed(cwd) !== trimmed(root)
+    const folderUrl = (path: string) => `file:///${path.replaceAll('\\', '/').replace(/^\/+/, '')}`
+    const repoHref = backend === 'github' ? `https://github.com/${repo}` : folderUrl(root)
+    const nowForTabs = await $.clock.now()
+    const readAt = (await $.state.get(SNAPSHOT)).value?.readAt ?? nowForTabs
     const tabBar = (
       <Box flexDirection="column" flexShrink={0} rowGap="sm" marginBottom="md">
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="md">
-          <Text color={DSH.link} weight="semibold" mono>{`⌂ ${await repoName($)}`}</Text>
-          <Box flexDirection="row" columnGap="xs">
-            <Button key="pane-new" label="New" onPress={() => startNew($)}>
-              <Text color={KIND_STYLES.map.color}>◈ New ▾</Text>
+        <Box flexDirection="row" alignItems="center" flexWrap="wrap" columnGap="sm" rowGap="xs">
+          <Link key="repo" href={repoHref}>
+            <Text color={backendColor} weight="semibold" mono>{`⌂ ${repo}`}</Text>
+          </Link>
+          {inSubfolder && (
+            <Link key="subworkspace" href={folderUrl(root)}>
+              <Text color={DSH.bad} weight="semibold">▣ subfolder</Text>
+            </Link>
+          )}
+          <Text dimColor size="footnote">Backend: {BACKEND_NAMES[backend]}</Text>
+          <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
+            <Button key="switch-backend" label="Switch backend" dimColor onPress={() => switchBackend(backend === 'github' ? 'markdown' : 'github')}>
+              ⇄
             </Button>
-            <Button key="pane-bug" label="+Bug" onPress={() => startBug($)}>
-              <Text color={KIND_STYLES.bug.color}>✱ +Bug</Text>
+            <Button key="palette" label="Palette" dimColor onPress={() => $.state.set(TAB, 'palette')}>
+              ◐
             </Button>
           </Box>
+          <Box flexGrow={1} />
+          <Button key="refresh" label="Refresh" onPress={() => refresh($)}>
+            ↻ Refresh
+          </Button>
+          <Text dimColor size="footnote">{freshness(readAt, nowForTabs)}</Text>
         </Box>
-        <Box flexDirection="row" flexWrap="wrap" columnGap="xs">
-          {TABS.map(([id, label]) => (
+        <Box flexDirection="row" alignItems="center" flexWrap="wrap" columnGap="xs" rowGap="xs">
+          {TABS.map(([id, icon, name]) => (
             <Button
               key={`tab:${id}`}
-              label={label}
+              label={name}
               variant={tab === id ? 'primary' : undefined}
               dimColor={tab !== id}
               onPress={async () => {
                 if (id === 'checks') await recheck()
                 await $.state.set(TAB, id)
               }}
-            />
+            >
+              <Text underline={tab === id}>{tabWords(name) ? `${icon} ${name}` : icon}</Text>
+            </Button>
           ))}
+          <Box flexGrow={1} />
+          <Button key="pane-new" label="New Requirement" onPress={() => startNew($)}>
+            <Text color={KIND_STYLES.map.color}>{columns >= 64 ? '◈ New Requirement ▾' : '◈ ▾'}</Text>
+          </Button>
+          <Button key="pane-bug" label="+BUG" onPress={() => startBug($)}>
+            <Text color={KIND_STYLES.bug.color}>✱ +BUG</Text>
+          </Button>
+          <Button key="work-route" label="Work Route" dimColor onPress={() => $.state.set(ROUTE_OPEN, !routeOpen)}>
+            ☷
+          </Button>
         </Box>
       </Box>
     )
@@ -1529,6 +1598,15 @@ ${card.chain}`}</Text>
       </Button>
     )
     const divider = <Text dimColor>│</Text>
+    const partial = backend === 'github' && items.length >= GH_LIST_LIMIT
+    const loose = looseCount(items)
+    const labelsOpen = (await $.state.get(LABELS_OPEN)).value ?? false
+    const byClicks = labelsByClicks(items, view.clicks)
+    const shownLabels = labelsOpen ? byClicks : byClicks.slice(0, LABELS_SHOWN)
+    const hiddenLabels = byClicks.length - LABELS_SHOWN
+    const effortNames = backend === 'markdown' ? efforts(items) : []
+    const active = view.chips.length + (view.effort === null ? 0 : 1)
+    const arrow = (sort: BoardSort) => (view.sort === sort ? (view.descending ? ' ↓' : ' ↑') : '')
 
     return (
       <Box flexDirection="column">
@@ -1539,45 +1617,54 @@ ${card.chain}`}</Text>
             <Text color={STATUS_STYLES.blocked.color} weight="semibold">{`${STATUS_STYLES.blocked.icon} ${blocked} Blocked`}</Text>
             <Text dimColor>{`${STATUS_STYLES.closed.icon} ${closed} Closed`}</Text>
           </Box>
-          <Box flexDirection="row" alignItems="center" columnGap="xs">
-            <Button key="health" label="Health check" onPress={press => openSession($, healthCheckPrompt(backend), 'Health check', press.surface)}>
-              ♥ Health check
-            </Button>
-            <Button key="refresh" label="Refresh" onPress={() => refresh($)}>
-              ↻ Refresh
-            </Button>
-            <Text dimColor size="footnote">{freshness(snapshot.readAt, now)}</Text>
-          </Box>
+          <Button key="health" label="Health check" onPress={press => openSession($, healthCheckPrompt(backend), 'Health check', press.surface)}>
+            <Text>{`♥ Health check ${loose}`}</Text>
+            {partial && <Text key="partial" color={AMBER}>{' ●'}</Text>}
+          </Button>
         </Box>
+        {effortNames.length > 1 && (
+          <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs" marginTop="md">
+            <Text dimColor size="footnote">Effort</Text>
+            {effortNames.map(name =>
+              chip(`effort:${name}`, name, view.effort === name, () => choose({ effort: view.effort === name ? null : name })),
+            )}
+          </Box>
+        )}
+        {active > 0 && (
+          <Box key="active" flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs" marginTop="md">
+            {view.effort !== null && (
+              <Button key="unset:effort" label={`Remove effort ${view.effort}`} onPress={() => choose({ effort: null })}>
+                <Text color={DSH.map}>{`${view.effort} ✕`}</Text>
+              </Button>
+            )}
+            {view.chips.map(label => (
+              <Button key={`unset:${label}`} label={`Remove ${label}`} onPress={() => toggleChip(label)}>
+                <Text color={colorOf(colors, [label])}>{`${label} ✕`}</Text>
+              </Button>
+            ))}
+            <Button key="clear-all" label="Clear all" dimColor onPress={() => choose({ chips: [], effort: null })}>
+              <Text>Clear all</Text>
+            </Button>
+          </Box>
+        )}
         <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs" marginY="md">
           {FILTERS.map(([filter, label]) => chip(`filter:${filter}`, label, view.filter === filter, () => choose({ filter })))}
           {divider}
-          {SORTS.map(([sort, label]) => chip(`sort:${sort}`, label, view.sort === sort, () => choose({ sort })))}
-          {allLabels(items).length > 0 && divider}
-          {allLabels(items).map(label =>
+          {SORTS.map(([sort, label]) => chip(`sort:${sort}`, `${label}${arrow(sort)}`, view.sort === sort, () => chooseSort(sort)))}
+          {byClicks.length > 0 && divider}
+          {shownLabels.map(label =>
             chip(`chip:${label}`, label, view.chips.includes(label), () => toggleChip(label), colorOf(colors, [label])),
+          )}
+          {hiddenLabels > 0 && (
+            <Button key="labels-toggle" label={labelsOpen ? 'Collapse labels' : `${hiddenLabels} more labels`} dimColor onPress={() => $.state.set(LABELS_OPEN, !labelsOpen)}>
+              <Text>{labelsOpen ? 'Collapse' : `+${hiddenLabels}`}</Text>
+            </Button>
           )}
         </Box>
         {snapshot.error && <Text color={STATUS_STYLES.blocked.color}>{`⚠ ${snapshot.error}`}</Text>}
         {cards.length === 0 && <Text dimColor>Nothing matches this view.</Text>}
         <Box flexDirection="column" rowGap="sm">
           {cards.map(item => renderCard(item, items, derivedItems))}
-        </Box>
-        <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" marginTop="md">
-          <Text dimColor size="footnote">Backend: {BACKEND_NAMES[backend]}</Text>
-          {(Object.keys(BACKEND_NAMES) as Backend[]).map(name => (
-            <Button
-              key={`backend:${name}`}
-              label={BACKEND_NAMES[name]}
-              variant={backend === name ? 'primary' : undefined}
-              dimColor={backend !== name}
-              onPress={() => switchBackend(name)}
-            />
-          ))}
-          {divider}
-          <Button key="palette" label="Palette" dimColor onPress={() => $.state.set(TAB, 'palette')}>
-            ◐ Palette
-          </Button>
         </Box>
       </Box>
     )

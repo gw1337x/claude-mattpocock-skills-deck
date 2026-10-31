@@ -70,7 +70,17 @@ export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'ready'
 export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 
 /** What the person has chosen on the List; kept in session state. */
-export type BoardView = { filter: BoardFilter; sort: BoardSort; chips: string[] }
+export type BoardView = {
+  filter: BoardFilter
+  sort: BoardSort
+  /** True when the sort runs largest or newest first; the title sort starts ascending, the others descending. */
+  descending: boolean
+  chips: string[]
+  /** The `.scratch/<effort>` folder the List is narrowed to; null shows every effort. */
+  effort: string | null
+  /** How often each label chip was picked, so the most used come first. */
+  clicks: Record<string, number>
+}
 
 /** The List as last read from the tracker; the Pane (and later the Capsule band) read this one copy. */
 export type BoardSnapshot = {
@@ -93,6 +103,8 @@ declare module 'claude-code' {
       snapshot: BoardSnapshot
       /** Path of the Container whose detail the Pane shows; absent or null shows the List. */
       detail: string | null
+      /** True while the label chips show every label, not the first four. */
+      labelsOpen: boolean
       /** Which Pane tab is shown; absent means the List. */
       tab: 'list' | 'skills' | 'prs' | 'checks' | 'palette'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */

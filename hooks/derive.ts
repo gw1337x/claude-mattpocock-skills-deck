@@ -12,7 +12,17 @@ export type Derived = {
   counts: Counts
 }
 
-export const DEFAULT_VIEW: BoardView = { filter: 'all', sort: 'updated', chips: [] }
+/** DSH: the title sort starts ascending, every other sort newest or largest first. */
+export const defaultDescending = (sort: BoardSort): boolean => sort !== 'title'
+
+export const DEFAULT_VIEW: BoardView = {
+  filter: 'all',
+  sort: 'updated',
+  descending: defaultDescending('updated'),
+  chips: [],
+  effort: null,
+  clicks: {},
+}
 
 export const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
@@ -70,12 +80,12 @@ export const derive = (items: BoardItem[]): Derived => {
   return { blocked, ready, levels: levelsOf(tickets, byRef), counts: { ready: ready.size, blocked: blocked.size, closed, needsTriage, bugs } }
 }
 
+/** Each sort ascending; the view reverses it for descending. */
 const SORTS: Record<BoardSort, (a: BoardItem, b: BoardItem) => number> = {
-  updated: (a, b) => b.updated - a.updated,
+  updated: (a, b) => a.updated - b.updated,
   // Ticket numbers follow creation order within a feature; Containers come first.
-  created: (a, b) =>
-    a.feature.localeCompare(b.feature) || (a.number ?? -1) - (b.number ?? -1),
-  number: (a, b) => (a.number ?? Infinity) - (b.number ?? Infinity),
+  created: (a, b) => a.feature.localeCompare(b.feature) || (a.number ?? -1) - (b.number ?? -1),
+  number: (a, b) => (a.number ?? -1) - (b.number ?? -1),
   title: (a, b) => a.title.localeCompare(b.title),
 }
 
@@ -99,12 +109,25 @@ const inFilter = (filter: BoardFilter, item: BoardItem, derived: Derived): boole
 export const visibleItems = (items: BoardItem[], derived: Derived, view: BoardView): BoardItem[] =>
   items
     .filter(item => inFilter(view.filter, item, derived))
+    .filter(item => view.effort === null || item.feature === view.effort)
     .filter(item => view.chips.every(chip => item.labels.includes(chip)))
-    .sort(SORTS[view.sort])
+    .sort((a, b) => (view.descending ? SORTS[view.sort](b, a) : SORTS[view.sort](a, b)))
 
 /** Every label on the List, for the chips. */
 export const allLabels = (items: BoardItem[]): string[] =>
   [...new Set(items.flatMap(item => item.labels))].sort((a, b) => a.localeCompare(b))
+
+/** The efforts (feature folders) the items live in, in name order. */
+export const efforts = (items: BoardItem[]): string[] =>
+  [...new Set(items.map(item => item.feature))].sort((a, b) => a.localeCompare(b))
+
+/** Every label, most clicked first, ties in name order. */
+export const labelsByClicks = (items: BoardItem[], clicks: Record<string, number>): string[] =>
+  allLabels(items).sort((a, b) => (clicks[b] ?? 0) - (clicks[a] ?? 0) || a.localeCompare(b))
+
+/** DSH's Health check number: open Tickets that no Container holds. */
+export const looseCount = (items: BoardItem[]): number =>
+  items.filter(item => !isContainer(item) && item.state === 'open' && item.parent === null).length
 
 /** The percentage in a body's `## Progress` (or `## Progress: N%`) section: the heading's, else the newest entry's; undefined without one. */
 export const readProgress = (body: string): number | undefined => {

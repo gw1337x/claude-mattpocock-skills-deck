@@ -121,17 +121,17 @@ for (const surface of SURFACES) {
     })
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'sort:updated' })
+    // Updated is the chosen sort and starts newest first.
     expect(await shown(ui)).toEqual(['garbled', 'Login crashes', 'Checkout UX', 'Invoice export'])
 
     await ui.press({ key: 'sort:title' })
     expect(await shown(ui)).toEqual(['Checkout UX', 'garbled', 'Invoice export', 'Login crashes'])
 
     await ui.press({ key: 'sort:number' })
-    expect(await shown(ui)).toEqual(['Login crashes', 'garbled', 'Checkout UX', 'Invoice export'])
+    expect(await shown(ui)).toEqual(['garbled', 'Login crashes', 'Checkout UX', 'Invoice export'])
 
     await ui.press({ key: 'sort:created' })
-    expect(await shown(ui)).toEqual(['Checkout UX', 'Invoice export', 'Login crashes', 'garbled'])
+    expect(await shown(ui)).toEqual(['garbled', 'Login crashes', 'Invoice export', 'Checkout UX'])
     await ui.unmount()
   })
 

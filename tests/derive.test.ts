@@ -1,7 +1,18 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { BoardItem } from '../types'
-import { derive, progressText, readProgress } from '../hooks/derive'
+import type { BoardView } from '../types'
+import {
+  DEFAULT_VIEW,
+  defaultDescending,
+  derive,
+  efforts,
+  labelsByClicks,
+  looseCount,
+  progressText,
+  readProgress,
+  visibleItems,
+} from '../hooks/derive'
 
 const ticket = (number: number, over: Partial<BoardItem> = {}): BoardItem => ({
   kind: 'plain',
@@ -64,4 +75,49 @@ test('Progress is worded as DSH words it', () => {
   expect(open(95)).toBe('95% · confirming')
   expect(open(100)).toBe('100% · acceptance')
   expect(progressText({ state: 'closed', progress: 40 })).toBe('Done')
+})
+
+const view = (over: Partial<BoardView>): BoardView => ({ ...DEFAULT_VIEW, ...over })
+const order = (items: BoardItem[], over: Partial<BoardView>) =>
+  visibleItems(items, derive(items), view(over)).map(item => item.title)
+
+test('the title sort defaults to ascending and every other sort to descending', () => {
+  expect(defaultDescending('title')).toBe(false)
+  for (const sort of ['updated', 'created', 'number'] as const) expect(defaultDescending(sort)).toBe(true)
+})
+
+test('a sort runs in the direction the view holds', () => {
+  const items = [ticket(1, { title: 'B', updated: 5 }), ticket(2, { title: 'A', updated: 9 }), ticket(3, { title: 'C', updated: 1 })]
+  expect(order(items, { sort: 'title', descending: false })).toEqual(['A', 'B', 'C'])
+  expect(order(items, { sort: 'title', descending: true })).toEqual(['C', 'B', 'A'])
+  expect(order(items, { sort: 'updated', descending: true })).toEqual(['A', 'B', 'C'])
+  expect(order(items, { sort: 'updated', descending: false })).toEqual(['C', 'B', 'A'])
+  expect(order(items, { sort: 'number', descending: true })).toEqual(['C', 'A', 'B'])
+  expect(order(items, { sort: 'created', descending: false })).toEqual(['B', 'A', 'C'])
+})
+
+test('an effort narrows the list to its folder', () => {
+  const items = [ticket(1, { feature: 'a' }), ticket(2, { feature: 'b', path: 'b/2.md' })]
+  expect(order(items, { effort: 'b' })).toEqual(['T2'])
+  expect(order(items, { effort: null })).toEqual(['T1', 'T2'])
+})
+
+test('efforts are the folders that hold items, in order', () => {
+  expect(efforts([ticket(1, { feature: 'b' }), ticket(2, { feature: 'a', path: 'x' }), ticket(3, { feature: 'b', path: 'y' })])).toEqual(['a', 'b'])
+})
+
+test('labels run by clicks, most first, then by name', () => {
+  const items = [ticket(1, { labels: ['b', 'a', 'c'] })]
+  expect(labelsByClicks(items, {})).toEqual(['a', 'b', 'c'])
+  expect(labelsByClicks(items, { c: 3, b: 1 })).toEqual(['c', 'b', 'a'])
+})
+
+test('the Health check count is the open Tickets no Container holds', () => {
+  const items = [
+    ticket(1),
+    ticket(2, { state: 'closed' }),
+    ticket(3, { parent: 'f/map.md' }),
+    ticket(4, { kind: 'map', number: null, path: 'f/map.md' }),
+  ]
+  expect(looseCount(items)).toBe(1)
 })

@@ -252,7 +252,7 @@ for (const surface of SURFACES) {
     const ui = await mount($, surface)
     expect(await texts(ui)).toContain('Backend: Markdown')
 
-    await ui.press({ key: 'backend:github' })
+    await ui.press({ key: 'switch-backend' })
     expect(await texts(ui)).toContain('Backend: GitHub')
     expect(gh.calls.some(c => c.startsWith('api graphql'))).toBe(true)
     expect([...stored.values()]).toContain('github')

@@ -477,13 +477,13 @@ const REPLIES_WITH_ROUTE = new Set(['deck_issue_report', 'deck_issue_create', 'd
 
 /** Answers one Deck tool call; a refusal reaches the model as the call's error. */
 const answerDeckTool = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
-  const answer = await answerDeckToolBody($, name, input)
+  const answer = await answerWithoutRoute($, name, input)
   if (!REPLIES_WITH_ROUTE.has(name) || answer === null || typeof answer !== 'object') return answer
   const route = await readRoute($, await resolveBackend($))
   return { ...answer, workRoute: readoutOf(route, await $.clock.now(), detailOf(input.workRouteDetail)) }
 }
 
-const answerDeckToolBody = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
+const answerWithoutRoute = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
   const found = await findBackend($)
   if (name === 'deck_context') {
     // Naming a GitHub Backend needs no read, so a `gh` failure cannot hide it; Markdown is read for its efforts.
@@ -821,14 +821,21 @@ const ROUTE_COLUMNS = [
 ] as const
 const ROUTE_WIDTHS = Object.fromEntries(ROUTE_COLUMNS) as Record<(typeof ROUTE_COLUMNS)[number][0], number>
 
-/** Applies one session's change to the cross-session route without losing what other sessions wrote meanwhile. */
+/**
+ * Applies one session's change to the cross-session route without losing what other sessions wrote meanwhile. A store
+ * that cannot be read is left alone: treating it as empty would overwrite every other session's entries.
+ */
 const changeRoute = async ($: Engine, backend: Backend, change: (route: RouteStore) => RouteStore) => {
   const key = await routeKey($)
-  await commitRoute(
-    () => readRoute($, backend),
-    route => $.store.set(key, route),
-    change,
-  )
+  try {
+    await commitRoute(
+      async () => routeFrom(await $.store.get(key), backend),
+      route => $.store.set(key, route),
+      change,
+    )
+  } catch {
+    return
+  }
   $.ui.invalidate('ui.render')
 }
 

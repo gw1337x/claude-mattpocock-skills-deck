@@ -281,6 +281,19 @@ for (const surface of SURFACES) {
     expect(others(held)).toEqual(['rival/1', 'rival/2', 'rival/3', 'rival/4', 'rival/5', 'rival/6'])
   })
 
+  test(`a route the store cannot read is left as it is, not overwritten as empty on ${surface}`, async ($, on) => {
+    const held: Held = { [STORE_KEY]: stored(['other', [entry('checkout-ux/01', 500, { source: 'reported' })]]) }
+    const before = JSON.stringify(held[STORE_KEY])
+    const clock = serveFiles(on, MARKDOWN_TRACKER)
+    serveSession(on, held, 'mine', () => {
+      throw new Error('store unavailable')
+    })
+    await clock.set(1_000)
+
+    await report($, { key: 'checkout-ux/02' })
+    expect(JSON.stringify(held[STORE_KEY])).toBe(before)
+  })
+
   test(`core replies with key, session and time for the newest 20 entries, and core is the default on ${surface}`, async ($, on) => {
     const crowd = Array.from({ length: 25 }, (_, i) => entry(`crowd/${String(i + 1).padStart(2, '0')}`, 1_000 + i))
     const held: Held = { [STORE_KEY]: stored(['crowd', crowd]) }

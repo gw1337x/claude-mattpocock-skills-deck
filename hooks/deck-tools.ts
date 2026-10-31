@@ -70,6 +70,14 @@ export const SCOPE_SCHEMA = {
   feature: { type: 'string', description: "Markdown only: the Spec's .scratch/<feature-slug> folder. Not with effort." },
 }
 
+/** `workRouteDetail`, as every tool that ends its reply with the Work Route takes it. */
+export const WORK_ROUTE_DETAIL = {
+  type: 'string',
+  enum: ['core', 'standard'],
+  description:
+    'How much of the Work Route the reply carries: core (default) is ticket key, session and time for the newest 20 entries; standard adds title and action for every entry.',
+}
+
 export const KEY_SCHEMA = {
   type: ['string', 'number'],
   description:
@@ -128,7 +136,7 @@ export const DECK_TOOLS: DeckToolSpec[] = [
       properties: {
         key: KEY_SCHEMA,
         note: { type: 'string', description: 'A few words on what you are doing.' },
-        workRouteDetail: { type: 'string', enum: ['core', 'standard'], description: 'How much of the Work Route the reply carries: core (default) is ticket key, session and time for the newest 20 entries; standard adds title and action for every entry.' },
+        workRouteDetail: WORK_ROUTE_DETAIL,
         release: { type: 'boolean', default: false, description: "true takes the ticket off this session's Work Route." },
         ...SCOPE_SCHEMA,
       },

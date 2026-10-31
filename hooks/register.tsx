@@ -150,10 +150,10 @@ const openSession = async ($: Engine, text: string, name: string, surface: Rende
   const before = stillOpen(await $.store.get(key), now)
   await $.store.set(key, [...before, { head: headOf(text), title: newTitle(name), at: now }])
   try {
-    const link = newSessionLink(text, await workspaceRoot($))
+    const link = newSessionLink(text)
     const result = await $.process.run(['powershell', '-NoProfile', '-Command', `Start-Process '${link}'`])
     if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `the link did not open (exit ${result.exitCode})`)
-    $.ui.toast('Opened a new session: check the folder prompt, then press send there.')
+    $.ui.toast('Opened a new session: press send there.')
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
     debugNote(`Could not open a new session: ${why}`)

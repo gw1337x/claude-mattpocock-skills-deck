@@ -24,7 +24,7 @@ const BUG = '.scratch/loose/issues/01-login-crash.md'
 const REPORT = 'mcp__mattpocock-skills-deck__deck_issue_report'
 const COMPOSER = { kind: 'composer' } as const
 
-type Started = { prompt: string; folder: string; link: string }
+type Started = { prompt: string; folder: string | null; link: string }
 
 /**
  * The fake Desktop link opener (`powershell Start-Process`), the prompt box, `/rename`, the clipboard, toasts and an
@@ -43,7 +43,7 @@ const serveSession = (on: On, mode: 'works' | 'throws' | 'isError' = 'works') =>
     const link = /Start-Process '(.*)'$/.exec(e.argv[e.argv.length - 1] ?? '')?.[1]
     if (link === undefined) return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
     const query = new URL(link).searchParams
-    log.started.push({ link, prompt: query.get('q') ?? '', folder: query.get('folder') ?? '' })
+    log.started.push({ link, prompt: query.get('q') ?? '', folder: query.get('folder') })
     if (mode === 'throws') throw new Error('no such program')
     return { value: { exitCode: mode === 'works' ? 0 : 1, stdout: '', stderr: mode === 'works' ? '' : 'refused' } } as never
   })
@@ -93,7 +93,7 @@ for (const surface of SURFACES) {
 
     expect(log.started).toHaveLength(1)
     expect(log.started[0]?.link).toMatch(/^claude:\/\/code\/new\?q=/)
-    expect(log.started[0]?.folder).not.toBe('')
+    expect(log.started[0]?.folder).toBeNull()
     expect(log.started[0]?.prompt).toMatch(/^## Health check \(put orphaned open tickets where they belong\)/)
     expect(log.started[0]?.prompt).toContain('map.md')
     expect(log.fills).toHaveLength(0)

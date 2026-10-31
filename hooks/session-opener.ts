@@ -1,4 +1,4 @@
-/** Desktop's own link for a new Code session: it fills the box in `folder` and never sends (Desktop asks about the folder first). */
+/** Desktop's own link for a new Code session: it fills the box and never sends. No `folder`: Desktop opens it on "this computer", not in the environment the deck runs in. */
 const NEW_SESSION_LINK = 'claude://code/new'
 
 /** Desktop cuts `q` at about 14,000 characters. */
@@ -7,9 +7,8 @@ const LINK_PROMPT_MAX = 14_000
 /** `encodeURIComponent` leaves `'` alone, which would end the quoted argument the link is passed in. */
 const encode = (value: string): string => encodeURIComponent(value).replace(/'/g, '%27')
 
-/** The link that opens a new session in `folder` with `text` in its box. */
-export const newSessionLink = (text: string, folder: string): string =>
-  `${NEW_SESSION_LINK}?q=${encode(text.slice(0, LINK_PROMPT_MAX))}&folder=${encode(folder)}`
+/** The link that opens a new session with `text` in its box. */
+export const newSessionLink = (text: string): string => `${NEW_SESSION_LINK}?q=${encode(text.slice(0, LINK_PROMPT_MAX))}`
 
 /** How long an opened session may wait for its first message before the deck forgets it. */
 export const OPENED_MS = 5 * 60_000

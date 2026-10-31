@@ -41,16 +41,46 @@ const unified = (path: string, before: string | null, after: string | null): str
 export const serveGit = (
   on: On,
   files: Record<string, FakeFile>,
-  options: { remote?: string; commitFails?: string } = {},
+  options: {
+    remote?: string
+    commitFails?: string
+    /** The branch: null name = detached; `upstream` empty = none; `track` is git's `%(upstream:track)`. */
+    branch?: { name: string | null; upstream?: string; track?: string }
+    /** Unfinished operations, by the ref git would resolve (MERGE_HEAD ...). */
+    midOps?: string[]
+    log?: string[]
+    worktrees?: string
+    /** Stderr for a failing fetch, pull or push. */
+    syncFails?: Partial<Record<'fetch' | 'pull' | 'push', string>>
+  } = {},
 ): GitServer => {
   const server: GitServer = { calls: [], files: structuredClone(files), commits: [] }
 
   on('process.run', (_, e) => {
     const argv = [...e.argv]
     if (argv[0] !== 'git') return reply('', 1, `unexpected command ${argv.join(' ')}`)
-    if (argv[1] === 'rev-parse') return reply('true\n')
+    if (argv[1] === 'rev-parse') {
+      if (argv.includes('--verify')) return (options.midOps ?? []).includes(argv.at(-1) ?? '') ? reply('abc1234\n') : reply('', 1)
+      if (argv.includes('--short')) return reply('abc1234\n')
+      return reply('true\n')
+    }
+    if (argv[1] === 'symbolic-ref') {
+      const name = options.branch ? options.branch.name : 'main'
+      return name === null ? reply('', 1, 'fatal: ref HEAD is not a symbolic ref') : reply(`${name}\n`)
+    }
     if (argv[1] === 'remote') return reply(options.remote ?? '')
     server.calls.push(argv.slice(1).join(' '))
+    const syncKind = argv[1] === 'fetch' || argv[1] === 'pull' || argv[1] === 'push' ? argv[1] : null
+    if (syncKind) {
+      const failure = options.syncFails?.[syncKind]
+      return failure ? reply('', 1, failure) : reply('')
+    }
+    if (argv[1] === 'for-each-ref') {
+      const upstream = options.branch ? (options.branch.upstream ?? '') : 'origin/main'
+      return reply(`${upstream}|${options.branch?.track ?? ''}\n`)
+    }
+    if (argv[1] === 'log') return reply((options.log ?? []).map(line => `${line}\n`).join(''))
+    if (argv[1] === 'worktree') return reply(options.worktrees ?? '')
     const dash = argv.indexOf('--')
     const paths = dash === -1 ? [] : argv.slice(dash + 1)
 

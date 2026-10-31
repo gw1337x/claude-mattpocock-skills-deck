@@ -37,7 +37,7 @@ const CONFLICT = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
 const failure = (result: RunResult): GitError =>
   new GitError(result.stderr.trim().split(/\r?\n/)[0] || result.stdout.trim().split(/\r?\n/)[0] || 'git failed')
 
-const git = async (run: Run, argv: string[], okCodes: number[] = [0]): Promise<string> => {
+export const git = async (run: Run, argv: string[], okCodes: number[] = [0]): Promise<string> => {
   let result: RunResult
   try {
     result = await run(['git', ...argv])

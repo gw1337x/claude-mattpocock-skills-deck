@@ -26,7 +26,7 @@ type Ui = {
   find: (query: { key: string }) => Promise<Found | undefined>
   findAll: (query: { type: string }) => Promise<Found[]>
   press: (target: { key: string }) => Promise<unknown>
-  input: (target: { key: string; text: string }) => Promise<unknown>
+  input: (target: { key: string; text: string; kind?: 'change' }) => Promise<unknown>
   unmount: () => Promise<unknown>
 }
 
@@ -119,6 +119,91 @@ for (const surface of SURFACES) {
 
     expect(await drawn(ui, 'chip:needs-triage')).toContain('#654321')
     expect(await drawn(ui, action)).toContain('#123456')
+    await ui.unmount()
+  })
+
+  test(`Close goes straight back to the List when nothing is unsaved on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...GITHUB_DOC })
+    serveGh(on, { colors: COLORS })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'palette' })
+    await ui.press({ key: 'palette-close' })
+    expect(await ui.find({ key: 'palette-ask' })).toBeUndefined()
+    expect(await ui.find({ key: 'color:bug' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test(`Close with an unsaved colour asks first; Keep editing stays and Discard leaves on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...GITHUB_DOC })
+    serveGh(on, { colors: COLORS })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'palette' })
+    await ui.input({ key: 'color:bug', text: 'red', kind: 'change' })
+    await ui.press({ key: 'palette-close' })
+    expect(await texts(ui)).toContainEqual(expect.stringMatching(/Discard unsaved colour changes \(bug\)\?/))
+
+    await ui.press({ key: 'palette-keep' })
+    expect(await ui.find({ key: 'palette-ask' })).toBeUndefined()
+    expect(await ui.find({ key: 'color:bug' })).toBeDefined()
+
+    await ui.press({ key: 'palette-close' })
+    await ui.press({ key: 'palette-discard' })
+    expect(await ui.find({ key: 'color:bug' })).toBeUndefined()
+    await ui.press({ key: 'palette' })
+    expect(await texts(ui)).not.toContainEqual(expect.stringMatching(/unsaved/))
+    await ui.unmount()
+  })
+
+  test(`the Save button saves the row's typed colour on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...GITHUB_DOC })
+    const gh = serveGh(on, { colors: COLORS })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'palette' })
+    await ui.press({ key: 'color-save:bug' })
+    expect(gh.calls.filter(call => call.startsWith('label edit'))).toContain('label edit bug --color d73a4a')
+    await ui.unmount()
+  })
+
+  test(`Copy a color-scheme prompt copies DSH's text with the repo and a Label | Current color table on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...GITHUB_DOC })
+    serveGh(on, { colors: COLORS })
+    const copied: string[] = []
+    on('ui.copy', (_, e) => {
+      copied.push((e as { text: string }).text)
+      return { value: { isCopied: true } }
+    })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'palette' })
+    await ui.press({ key: 'palette-copy' })
+    expect(copied).toHaveLength(1)
+    expect(copied[0]).toMatch(/^Target repository: .+\.\nTask: design one coordinated color scheme for the labels in this repository\./)
+    expect(copied[0]).toContain('| Label | Current color |\n| --- | --- |\n| bug | d73a4a |')
+    expect(copied[0]).toContain('| ready-for-agent | 0e8a16 |')
+    expect(copied[0]).toMatch(/Output requirements:\n- Produce the scheme only; do not modify any label yet\./)
+    expect(copied[0]).toMatch(/reply "Apply it", you do not change any label color yourself/)
+    await ui.unmount()
+  })
+
+  test(`on Markdown the copied prompt names the workspace and the label-colors file on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...MARKDOWN_TRACKER })
+    serveGh(on)
+    const copied: string[] = []
+    on('ui.copy', (_, e) => {
+      copied.push((e as { text: string }).text)
+      return { value: { isCopied: true } }
+    })
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'palette' })
+    await ui.press({ key: 'palette-copy' })
+    expect(copied[0]).toMatch(/^Target workspace folder: /)
+    expect(copied[0]).toContain('for the labels in this workspace')
+    expect(copied[0]).toContain('do not modify any file yet')
+    expect(copied[0]).toContain('| needs-triage | e99695 |')
     await ui.unmount()
   })
 }

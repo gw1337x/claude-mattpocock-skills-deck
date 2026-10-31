@@ -50,6 +50,8 @@ import {
   COLORS_FILE,
   COLORS_YAML_FILE,
   colorOf,
+  colorSchemePrompt,
+  cssColor,
   parseColor,
   readGithubColors,
   readMarkdownColors,
@@ -211,6 +213,8 @@ const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as
 const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
 const DIAGNOSTICS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'diagnosticsOpen' } as const
 const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as const
+const PALETTE_DRAFTS = { plugin: 'mattpocock-skills-deck', key: 'paletteDrafts' } as const
+const PALETTE_ASK = { plugin: 'mattpocock-skills-deck', key: 'paletteAsk' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
@@ -1800,6 +1804,11 @@ ${card.chain}`}</Text>
       const note = (await $.state.get(PALETTE_NOTE)).value ?? null
       const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
       const labels = [...new Set([...Object.keys(colors), ...allLabels(snapshot.items)])].sort()
+      const drafts = (await $.state.get(PALETTE_DRAFTS)).value ?? {}
+      const asking = (await $.state.get(PALETTE_ASK)).value === true
+      /** The draft's label names that differ from the saved colour. */
+      const unsaved = Object.keys(drafts).filter(label => parseColor(drafts[label] ?? '') !== (colors[label] ?? null))
+      const setDraft = (label: string, text: string) => $.state.set(PALETTE_DRAFTS, { ...drafts, [label]: text })
       const save = async (label: string, text: string) => {
         const hex = parseColor(text)
         if (hex === null) {
@@ -1818,33 +1827,87 @@ ${card.chain}`}</Text>
               await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
             }
           }
+          const { [label]: _saved, ...rest } = (await $.state.get(PALETTE_DRAFTS)).value ?? {}
+          await $.state.set(PALETTE_DRAFTS, rest)
           await $.state.set(PALETTE_NOTE, null)
         } catch (error) {
           if (!(error instanceof GhError)) throw error
           await $.state.set(PALETTE_NOTE, error.message)
         }
       }
+      const closePalette = async () => {
+        await $.state.set(PALETTE_DRAFTS, null)
+        await $.state.set(PALETTE_ASK, false)
+        await $.state.set(PALETTE_NOTE, null)
+        await $.state.set(TAB, 'list')
+      }
+      const copyScheme = async (surface: RenderSurface) => {
+        const text = colorSchemePrompt({
+          fileBacked: backend === 'markdown',
+          repo: await repoName($),
+          workspace: await workspaceRoot($),
+          colors: Object.fromEntries(labels.map(label => [label, colors[label] ?? ''])),
+        })
+        let ok = true
+        try {
+          ok = (await $.ui.copy({ text, surface })).isCopied !== false
+        } catch {
+          ok = false
+        }
+        $.ui.toast(ok ? 'Copied the color-scheme prompt.' : 'Could not copy the color-scheme prompt.')
+      }
       return (
         <Box flexDirection="column">
           {tabBar}
-          <Text bold>Palette</Text>
+          <Box flexDirection="row" columnGap="sm">
+            <Text bold>Palette</Text>
+            <Button key="palette-copy" label="Copy a color-scheme prompt" dimColor onPress={press => copyScheme(press.surface)}>
+              Copy a color-scheme prompt
+            </Button>
+            <Button key="palette-close" label="Close" dimColor onPress={() => (unsaved.length > 0 ? $.state.set(PALETTE_ASK, true) : closePalette())}>
+              Close
+            </Button>
+          </Box>
+          {asking && (
+            <Box key="palette-ask" flexDirection="column" borderStyle="round" borderColor={AMBER} padding="sm" rowGap="xs">
+              <Text color={AMBER}>{`Discard unsaved colour changes (${unsaved.join(', ')})?`}</Text>
+              <Box flexDirection="row" columnGap="sm">
+                <Button key="palette-discard" label="Discard" onPress={closePalette} />
+                <Button key="palette-keep" label="Keep editing" variant="primary" onPress={() => $.state.set(PALETTE_ASK, false)} />
+              </Box>
+            </Box>
+          )}
           {readOnly && <Text dimColor>You have read-only access to this repo, so Palette saves are disabled.</Text>}
           {note && <Text>{note}</Text>}
-          {labels.map(label => (
-            <Box key={`color-row:${label}`} flexDirection="column">
-              <Text color={colorOf(colors, [label])}>{`${label}  ${colors[label] ?? 'no colour'}`}</Text>
-              {Input && !readOnly && (
-                <Input
-                  key={`color:${label}`}
-                  label={`Colour for ${label}`}
-                  placeholder="6-digit hex"
-                  value={colors[label] ?? ''}
-                  submitLabel="save"
-                  onSubmit={(value: string) => save(label, value)}
-                />
-              )}
-            </Box>
-          ))}
+          {labels.map(label => {
+            const typed = drafts[label] ?? colors[label] ?? ''
+            const shown = parseColor(typed)
+            return (
+              <Box key={`color-row:${label}`} flexDirection="column">
+                <Box flexDirection="row" columnGap="sm">
+                  <Text color={shown === null ? undefined : cssColor(shown)}>{shown === null ? '□' : '■'}</Text>
+                  <Text color={colorOf(colors, [label])}>{`${label}  ${colors[label] ?? 'no colour'}`}</Text>
+                  {unsaved.includes(label) && <Text color={AMBER}>unsaved</Text>}
+                </Box>
+                {Input && !readOnly && (
+                  <Box flexDirection="row" columnGap="sm">
+                    <Input
+                      key={`color:${label}`}
+                      label={`Colour for ${label}`}
+                      placeholder="6-digit hex"
+                      value={typed}
+                      submitLabel="save"
+                      onInput={(value: string) => void setDraft(label, value)}
+                      onSubmit={(value: string) => save(label, value)}
+                    />
+                    <Button key={`color-save:${label}`} label={`Save ${label}`} onPress={() => save(label, typed)}>
+                      Save
+                    </Button>
+                  </Box>
+                )}
+              </Box>
+            )
+          })}
         </Box>
       )
     }

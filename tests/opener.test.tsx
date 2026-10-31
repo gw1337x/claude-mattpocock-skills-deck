@@ -63,6 +63,54 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
+  const SKILLS = { '.claude/skills/triage/SKILL.md': '---\ndisable-model-invocation: true\n---\n' }
+
+  test(`a new session is told to read the skill's file, not given /skill, when the file exists on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...MARKDOWN_TRACKER, ...SKILLS })
+    on('session.root', () => ({ value: '/work/shop' }))
+    const log = serveSession(on)
+    const ui = await mount($)
+
+    await ui.press({ key: `open:${BUG}` })
+
+    const prompt = String(log.started[0]?.prompt)
+    expect(prompt).toMatch(/^Read \/work\/shop\/\.claude\/skills\/triage\/SKILL\.md and follow that skill for the task below\.\n\n/)
+    expect(prompt).toContain(BUG)
+    expect(prompt).not.toMatch(/^\//)
+    expect(log.fills).toHaveLength(0)
+    await ui.unmount()
+  })
+
+  test(`the session opened with the skill's file still gets its [New] title on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...MARKDOWN_TRACKER, ...SKILLS })
+    on('session.root', () => ({ value: '/work/shop' }))
+    const log = serveSession(on)
+    const ui = await mount($)
+    await ui.press({ key: `open:${BUG}` })
+
+    expect(log.started[0]?.prompt).toMatch(/^Read /)
+    await $.prompt.submit({ text: String(log.started[0]?.prompt), wait: false, origin: COMPOSER })
+    await turnComplete($)
+
+    expect(log.renames).toHaveLength(1)
+    expect(log.renames[0]).toMatch(/^\[New\] /)
+    await ui.unmount()
+  })
+
+  test(`the fallback still fills the box with the slash form when the skill's file exists on ${surface}`, async ($, on) => {
+    serveFiles(on, { ...MARKDOWN_TRACKER, ...SKILLS })
+    on('session.root', () => ({ value: '/work/shop' }))
+    const log = serveSession(on, 'throws')
+    const ui = await mount($)
+
+    await ui.press({ key: `open:${BUG}` })
+
+    expect(log.started[0]?.prompt).toMatch(/^Read /)
+    expect(log.fills[0]).toMatch(/^\/triage\n/)
+    expect(log.copied).toEqual(log.fills)
+    await ui.unmount()
+  })
+
   test(`the detail view has the same # button on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveSession(on)

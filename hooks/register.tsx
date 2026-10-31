@@ -127,7 +127,7 @@ import { DSH, PIXEL } from './theme'
 import { cardGroups, layersPassed, mapSections, sectionLabel, specSections, startTarget } from './container'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
 import { HANDOFF_DIR, newestHandoff } from './handoff'
-import { claim, newSessionLink, newTitle, stillOpen } from './session-opener'
+import { claim, newSessionLink, newTitle, readSkillPrompt, slashSkill, stillOpen } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
@@ -210,13 +210,15 @@ const openedKey = async ($: Engine) => `opened:${await repoKey($)}`
  * link cannot be opened, the prompt goes in this box and on the clipboard, with a toast saying so.
  */
 const openSession = async ($: Engine, text: string, name: string, surface: RenderSurface, fallbackTitle?: string | null) => {
+  // What the new session receives; `text` stays as the slash command for the box and the clipboard.
+  const sent = readSkillPrompt(text, await skillFileFor($, slashSkill(text)?.name))
   // Noted before the link opens, so the new session's first message finds its record whenever it arrives.
   const now = await $.clock.now()
   const key = await openedKey($)
   const before = stillOpen(await $.store.get(key), now)
-  await $.store.set(key, [...before, { head: headOf(text), title: newTitle(name), at: now }])
+  await $.store.set(key, [...before, { head: headOf(sent), title: newTitle(name), at: now }])
   try {
-    const link = newSessionLink(text)
+    const link = newSessionLink(sent)
     const result = await $.process.run(['powershell', '-NoProfile', '-Command', `Start-Process '${link}'`])
     if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `the link did not open (exit ${result.exitCode})`)
     $.ui.toast('Opened a new session: press send there.')
@@ -607,6 +609,27 @@ const installedSkillNames = async ($: Engine): Promise<string[] | null> => {
     }
   }
   return loaded === null && onDisk.length === 0 ? null : [...(loaded ?? []), ...onDisk]
+}
+
+/** The absolute path of a skill's SKILL.md, the project's before the user's; null when there is none. */
+const skillFileFor = async ($: Engine, name: string | undefined): Promise<string | null> => {
+  if (name === undefined) return null
+  let root: string | undefined
+  try {
+    root = (await $.session.root()).replace(/[\\/]+$/, '')
+  } catch {
+    // No root: only the user's skills are tried, since the new session cannot resolve a relative path.
+  }
+  const [project, ...user] = skillFiles(name, await homeDir($))
+  const candidates = [root !== undefined && project !== undefined ? `${root}/${project}` : undefined, ...user]
+  for (const path of candidates) {
+    try {
+      if (path !== undefined && (await $.fs.exists(path))) return path
+    } catch {
+      // Try the next place.
+    }
+  }
+  return null
 }
 
 /** The text of a skill's SKILL.md, or null when it is in none of the usual places. */

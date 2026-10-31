@@ -1,16 +1,28 @@
 import type { BoardItem } from '../types'
 
-/** One time the AI touched a Ticket. */
+/** One Ticket on a session's route, in DSH's version-3 shape. */
 export type RouteEntry = {
-  ticket: number
-  /** Where the Board keeps it, or null when the Board does not know the Ticket. */
-  path: string | null
+  /** `#7` on GitHub, `<effort>/<NN>` on Markdown. */
+  ticketKey: string
+  /** The Markdown effort folder, null on GitHub or when the Board does not know the Ticket. */
+  effortId: string | null
   title: string
-  /** What was done, as a past-tense word ("commented", "edited"). */
+  /** What was done: `report` for a report, else a past-tense word ("commented", "edited"). */
   action: string
-  time: number
-  session: string
+  actionAt: number
+  /** `reported` when the model said so with deck_issue_report, `auto` when the deck inferred it from a tool call. */
+  source: 'reported' | 'auto'
+  hasWork: boolean
 }
+
+/** One session's entries. */
+export type Worker = { session: string; label: string; labelAt: number; entries: RouteEntry[] }
+
+/** What the cross-session store holds for a repo. */
+export type RouteStore = { v: 3; at: number; backend: string; workers: Worker[] }
+
+/** One line of the Work Route table. */
+export type RouteRow = { session: string; label: string; entry: RouteEntry; stale: boolean }
 
 /** What a tool call said about a Ticket, before it is matched to the Board. */
 export type Touch = { ticket: number; feature: string | null; action: string }
@@ -53,26 +65,61 @@ export const touchOf = (call: { tool: string; [argument: string]: unknown }): To
 export const itemFor = (touch: Touch, items: BoardItem[]): BoardItem | undefined =>
   items.find(item => item.number === touch.ticket && (touch.feature === null || item.feature === touch.feature))
 
-/** Entries that have not outlived the purge window. */
-export const prune = (entries: RouteEntry[], now: number): RouteEntry[] =>
-  entries.filter(entry => now - entry.time < PURGE_MS)
+export const emptyRoute = (backend: string, now = 0): RouteStore => ({ v: 3, at: now, backend, workers: [] })
 
-const active = (entries: RouteEntry[], now: number) => entries.filter(entry => now - entry.time < ACTIVE_MS)
-
-/** This session's active entries, newest first. */
-export const ownRoute = (entries: RouteEntry[], session: string, now: number): RouteEntry[] =>
-  active(entries, now)
-    .filter(entry => entry.session === session)
-    .sort((a, b) => b.time - a.time)
-
-/** "2 other sessions active here: #14, #15", or null when no other session is active. */
-export const othersLine = (entries: RouteEntry[], session: string, now: number): string | null => {
-  const others = active(entries, now).filter(entry => entry.session !== session)
-  if (others.length === 0) return null
-  const sessions = new Set(others.map(entry => entry.session)).size
-  const tickets = [...new Set(others.map(entry => entry.ticket))].sort((a, b) => a - b)
-  return `${sessions} other session${sessions === 1 ? '' : 's'} active here: ${tickets.map(n => `#${n}`).join(', ')}`
+/** The stored route if it is a version-3 one, else an empty route. */
+export const routeFrom = (stored: unknown, backend: string): RouteStore => {
+  const route = stored as Partial<RouteStore> | null | undefined
+  return route && route.v === 3 && Array.isArray(route.workers) ? (route as RouteStore) : emptyRoute(backend)
 }
+
+/** Drops entries past the purge window, and sessions left with none. */
+const pruned = (route: RouteStore, now: number): Worker[] =>
+  route.workers
+    .map(worker => ({ ...worker, entries: worker.entries.filter(entry => now - entry.actionAt < PURGE_MS) }))
+    .filter(worker => worker.entries.length > 0)
+
+/**
+ * Notes a Ticket on a session's route. A Ticket is listed once per session: a later touch refreshes its action and
+ * time, and a report keeps (or upgrades to) `reported`.
+ */
+export const record = (route: RouteStore, session: string, entry: RouteEntry, backend: string, now: number): RouteStore => {
+  const workers = pruned(route, now)
+  const own = workers.find(worker => worker.session === session)
+  if (!own) {
+    workers.push({ session, label: session, labelAt: now, entries: [entry] })
+  } else {
+    const index = own.entries.findIndex(each => each.ticketKey === entry.ticketKey)
+    const before = own.entries[index]
+    if (before === undefined) own.entries.push(entry)
+    else own.entries[index] = { ...entry, source: before.source === 'reported' ? 'reported' : entry.source }
+  }
+  return { v: 3, at: now, backend, workers }
+}
+
+/** Takes a Ticket off a session's route, as a release does. */
+export const release = (route: RouteStore, session: string, ticketKey: string, backend: string, now: number): RouteStore => ({
+  v: 3,
+  at: now,
+  backend,
+  workers: pruned(route, now)
+    .map(worker => (worker.session === session ? { ...worker, entries: worker.entries.filter(e => e.ticketKey !== ticketKey) } : worker))
+    .filter(worker => worker.entries.length > 0),
+})
+
+/** Every session's entries, newest first, each marked stale once idle for more than a day. */
+export const rowsOf = (route: RouteStore, now: number): RouteRow[] =>
+  route.workers
+    .flatMap(worker => worker.entries.map(entry => ({ session: worker.session, label: worker.label, entry, stale: now - entry.actionAt > ACTIVE_MS })))
+    .sort((a, b) => b.entry.actionAt - a.entry.actionAt)
+
+const ACTION_WORDS: Record<string, string> = { report: 'reported', close: 'closed', edit: 'edited', comment: 'commented' }
+
+/** The Action column's word for a stored action. */
+export const actionWord = (action: string): string => ACTION_WORDS[action] ?? action
+
+/** The number a ticket key ends in, for the band: `#7` and `checkout-ux/02` give 7 and 2. */
+export const numberOf = (ticketKey: string): number => Number(/(\d+)$/.exec(ticketKey)?.[1] ?? 0)
 
 export const ago = (time: number, now: number): string => {
   const minutes = Math.floor(Math.max(0, now - time) / 60_000)

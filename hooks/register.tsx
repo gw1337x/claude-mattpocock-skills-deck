@@ -54,10 +54,10 @@ import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { GITHUB_WRITES } from './github-write'
-import { DECK_READS, DECK_TOOLS, deckContext, DeckRefusal, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
+import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
-import { ago, itemFor, othersLine, ownRoute, prune, touchOf, type RouteEntry } from './work-route'
+import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
 type Engine = Parameters<Hook<'session.start'>>[0]
@@ -158,13 +158,12 @@ const sessionId = async ($: Engine): Promise<string> => {
 const overrideKey = async ($: Engine) => `backend:${await repoKey($)}`
 const routeKey = async ($: Engine) => `route:${await repoKey($)}`
 
-/** Every session's touches in this repo; an unreadable store is an empty route. */
-const readRoute = async ($: Engine): Promise<RouteEntry[]> => {
+/** Every session's route in this repo; an unreadable or older store is an empty route. */
+const readRoute = async ($: Engine, backend: Backend): Promise<RouteStore> => {
   try {
-    const stored = await $.store.get(await routeKey($))
-    return Array.isArray(stored) ? (stored as RouteEntry[]) : []
+    return routeFrom(await $.store.get(await routeKey($)), backend)
   } catch {
-    return []
+    return routeFrom(null, backend)
   }
 }
 
@@ -275,6 +274,13 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
     return deckContext(await workspaceRoot($), found, items)
   }
   if (found === null) throw new DeckRefusal(NO_BACKEND)
+  if (name === 'deck_issue_report') {
+    const { item, release: released } = deckIssueReport(await readDeck($, found.backend), input)
+    const key = keyOf(found.backend, item)
+    if (released) await dropFromRoute($, found.backend, key)
+    else await addToRoute($, found.backend, entryFor(found.backend, item, 'report', 'reported', await $.clock.now()))
+    return { key, title: item.title, state: item.state, route: released ? 'released' : 'reported' }
+  }
   const write = (found.backend === 'github' ? GITHUB_WRITES : DECK_WRITES)[name]
   if (write !== undefined) return write(await readDeck($, found.backend), input)
   const read = DECK_READS[name]
@@ -341,23 +347,52 @@ const readSkillFile = async ($: Engine, name: string): Promise<string | null> =>
   return null
 }
 
-/** Notes a Ticket the AI just touched in the cross-session store, dropping entries past the purge window. */
+/** The route entry for a Board item. */
+const entryFor = (backend: Backend, item: BoardItem, action: string, source: RouteEntry['source'], now: number): RouteEntry => ({
+  ticketKey: keyOf(backend, item),
+  effortId: backend === 'markdown' ? item.feature : null,
+  title: item.title,
+  action,
+  actionAt: now,
+  source,
+  hasWork: true,
+})
+
+/** Puts an entry on this session's route in the cross-session store, dropping entries past the purge window. */
+const addToRoute = async ($: Engine, backend: Backend, entry: RouteEntry) => {
+  const now = await $.clock.now()
+  const next = record(await readRoute($, backend), await sessionId($), entry, backend, now)
+  await $.store.set(await routeKey($), next)
+  $.ui.invalidate('ui.render')
+}
+
+/** Takes a ticket off this session's route. */
+const dropFromRoute = async ($: Engine, backend: Backend, ticketKey: string) => {
+  const next = release(await readRoute($, backend), await sessionId($), ticketKey, backend, await $.clock.now())
+  await $.store.set(await routeKey($), next)
+  $.ui.invalidate('ui.render')
+}
+
+/** Notes a Ticket the AI just touched, marked auto. */
 const recordTouch = async ($: Engine, call: Parameters<typeof touchOf>[0]) => {
   const touch = touchOf(call)
   if (!touch) return
-  const now = await $.clock.now()
-  const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
+  const backend = await resolveBackend($)
+  const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
   const item = itemFor(touch, snapshot.items)
-  const entry: RouteEntry = {
-    ticket: touch.ticket,
-    path: item?.path ?? null,
-    title: item?.title ?? `Ticket #${touch.ticket}`,
-    action: touch.action,
-    time: now,
-    session: await sessionId($),
-  }
-  await $.store.set(await routeKey($), [...prune(await readRoute($), now), entry])
-  $.ui.invalidate('ui.render')
+  const now = await $.clock.now()
+  const entry: RouteEntry = item
+    ? entryFor(backend, item, touch.action, 'auto', now)
+    : {
+        ticketKey: touch.feature === null ? `#${touch.ticket}` : `${touch.feature}/${String(touch.ticket).padStart(2, '0')}`,
+        effortId: touch.feature,
+        title: `Ticket #${touch.ticket}`,
+        action: touch.action,
+        actionAt: now,
+        source: 'auto',
+        hasWork: true,
+      }
+  await addToRoute($, backend, entry)
 }
 
 const freshness = (readAt: number, now: number): string => {
@@ -528,11 +563,12 @@ export const register: Register = on => {
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
     const collapsed = (await $.state.get(BAND_COLLAPSED)).value ?? false
     const now = await $.clock.now()
-    const entries = await readRoute($)
+    const backend = await resolveBackend($)
+    const route = await readRoute($, backend)
     const session = await sessionId($)
-    const mine = ownRoute(entries, session, now)
-    const others = othersLine(entries, session, now)
-    const latest = mine[0]
+    const rows = rowsOf(route, now)
+    const latest = rows.find(row => row.session === session)?.entry
+    const boardItem = (ticketKey: string) => snapshot.items.find(each => keyOf(backend, each) === ticketKey)
     // Only a score the Checks already worked out; the band never runs the checks itself.
     const envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
     const env = envChecks === null ? null : scoreOf(envChecks)
@@ -553,36 +589,46 @@ export const register: Register = on => {
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
         {routeOpen && (
           <Box key="route-panel" flexDirection="column" borderStyle="round" borderColor={DSH.border} padding="sm" rowGap="xs">
-            <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap="md">
-              <Box flexDirection="row" columnGap="sm">
-                <Text weight="semibold">Work Route</Text>
-                <Text dimColor size="footnote">{`this session · ${mine.length}`}</Text>
-              </Box>
-              {others && (
-                <Text dimColor size="footnote">
-                  {others}
-                </Text>
-              )}
+            <Box flexDirection="row" columnGap="sm">
+              <Text weight="semibold">Work Route</Text>
+              <Text dimColor size="footnote">{`${rows.length} ticket${rows.length === 1 ? '' : 's'} · ${route.workers.length} session${route.workers.length === 1 ? '' : 's'}`}</Text>
             </Box>
-            {mine.length === 0 && <Text dimColor>No Tickets touched in this session yet.</Text>}
-            {mine.map((entry, index) => (
-              <Button
-                key={`route:${index}`}
-                label={`#${entry.ticket} ${entry.title} · ${entry.action} · ${ago(entry.time, now)}`}
-                plain
-                onPress={async () => {
-                  if (entry.path === null) return
-                  await $.state.set(TAB, 'list')
-                  await $.state.set(DETAIL, entry.path)
-                  await $.ui.open({ id: PANE, title: PANE_TITLE })
-                }}
-              >
-                <Text color={BLUE} mono weight="semibold">{`#${entry.ticket} `}</Text>
-                <Text>{`${entry.title} `}</Text>
-                <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${entry.action} `}</Text>
-                <Text dimColor size="footnote">{`  ${ago(entry.time, now)}`}</Text>
-              </Button>
-            ))}
+            {rows.length === 0 && <Text dimColor>No Tickets touched in this repo yet.</Text>}
+            {rows.length > 0 && (
+              <Box flexDirection="row" columnGap="md">
+                {['Session', 'Ticket', 'Title', 'Action', 'State', 'When'].map(column => (
+                  <Text key={`route-head:${column}`} dimColor size="footnote" weight="semibold">
+                    {column}
+                  </Text>
+                ))}
+              </Box>
+            )}
+            {rows.map(({ session: owner, label, entry, stale: idle }, index) => {
+              const found = boardItem(entry.ticketKey)
+              const state = found?.state ?? 'unknown'
+              const when = `${ago(entry.actionAt, now)}${idle ? ' · stale' : ''}`
+              const mark = entry.source === 'reported' ? '' : ' · auto'
+              const who = owner === session ? 'this session' : label
+              return (
+                <Button
+                  key={`route:${index}`}
+                  label={`route row ${who} · ${entry.ticketKey} · ${entry.title} · ${actionWord(entry.action)}${mark} · ${state} · ${when}`}
+                  plain
+                  onPress={async () => {
+                    if (found === undefined) return
+                    await $.state.set(TAB, 'list')
+                    await $.state.set(DETAIL, found.path)
+                    await $.ui.open({ id: PANE, title: PANE_TITLE })
+                  }}
+                >
+                  <Text dimColor size="footnote">{`${who}  `}</Text>
+                  <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)} `}</Text>
+                  <Text>{`${entry.title} `}</Text>
+                  <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>
+                  <Text dimColor size="footnote">{`  ${state}  ${when}`}</Text>
+                </Button>
+              )
+            })}
           </Box>
         )}
         {menuOpen && (
@@ -613,11 +659,11 @@ export const register: Register = on => {
           {item('open-deck', 'Skills Deck', DSH.text, () => openBoard($, { filter: 'all', chips: [] }), '◷')}
           {item(
             'route',
-            latest ? `Work Route #${latest.ticket}` : 'Work Route',
+            latest ? `Work Route #${numberOf(latest.ticketKey)}` : 'Work Route',
             routeOpen ? BLUE : GREY_INK,
             () => $.state.set(ROUTE_OPEN, !routeOpen),
             '⌖',
-            latest ? `#${latest.ticket}` : 'Route',
+            latest ? `#${numberOf(latest.ticketKey)}` : 'Route',
           )}
           {item('count:ready', `Ready ${ready}`, GREEN, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', 'Ready', ready)}
           {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', 'BUG', bugs)}

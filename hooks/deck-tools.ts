@@ -107,6 +107,24 @@ export const DECK_TOOLS: DeckToolSpec[] = [
     isDeferred: false,
   },
   {
+    name: 'deck_issue_report',
+    description:
+      'Report the ticket you start, switch to, or close, so the Work Route shows what this session is working on. Call it on start, on switch and on close. Pass release=true when you stop working on the ticket.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: KEY_SCHEMA,
+        note: { type: 'string', description: 'A few words on what you are doing.' },
+        workRouteDetail: { type: 'string', enum: ['core', 'standard'], description: 'How much of the call the Work Route records.' },
+        release: { type: 'boolean', default: false, description: "true takes the ticket off this session's Work Route." },
+        ...SCOPE_SCHEMA,
+      },
+      required: ['key'],
+      additionalProperties: false,
+    },
+    isDeferred: false,
+  },
+  {
     name: 'deck_issue_list',
     description:
       'List issues, newest update first. Filter by state (default open), type, labels (an issue must carry every one), assignee and query (matched against the key and title). Returns at most limit items (default 50, max 200) and the total that matched; when the list may be incomplete it says so, and that sentence should be kept in anything written from it.',
@@ -254,6 +272,13 @@ const parentKey = (tracker: DeckTracker, item: BoardItem): string | null => {
   const parent = parentOf(tracker, item)
   return parent === undefined ? null : keyOf(tracker.backend, parent)
 }
+
+/** deck_issue_report: the ticket a report names, and whether it releases it. Recording it is the caller's. */
+export const deckIssueReport = (tracker: DeckTracker, input: Record<string, unknown>) => ({
+  item: findItem(tracker, input),
+  release: input.release === true,
+  note: stringIn(input.note),
+})
 
 /** deck_issue_get: one item with its body, comments and edges. */
 export const deckIssueGet = async (tracker: DeckTracker, input: Record<string, unknown>) => {

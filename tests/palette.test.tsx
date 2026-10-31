@@ -115,7 +115,7 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'palette' })
     await ui.input({ key: 'color:bug', text: '123456' })
     await ui.input({ key: 'color:needs-triage', text: '654321' })
-    await ui.press({ key: 'tab:board' })
+    await ui.press({ key: 'tab:list' })
 
     expect(await drawn(ui, 'chip:needs-triage')).toContain('#654321')
     expect(await drawn(ui, action)).toContain('#123456')

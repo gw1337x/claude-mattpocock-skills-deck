@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, cardTexts, isOn } from './board-text'
+import { listCounts, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 import { serveGh } from './serve-gh'
 import type { GhFailure, GhServer } from './serve-gh'
@@ -98,14 +98,14 @@ for (const backend of BACKENDS) {
   for (const surface of SURFACES) {
     const label = `${backend.name} on ${surface}`
 
-    test(`the Board lists Maps, Specs and standalone Tickets, not children: ${label}`, async ($, on) => {
+    test(`the List lists Maps, Specs and standalone Tickets, not children: ${label}`, async ($, on) => {
       backend.serve(on)
       const ui = await mount($, surface)
       const cards = await cardTexts(ui)
 
       expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
       expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
-      expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*Claimable.*needs-triage/))
+      expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*Ready.*needs-triage/))
       expect(cards.some(c => /Download button/.test(c))).toBe(false)
       await ui.unmount()
     })
@@ -114,7 +114,7 @@ for (const backend of BACKENDS) {
       backend.serve(on)
       const ui = await mount($, surface)
 
-      expect(await boardCounts(ui)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
+      expect(await listCounts(ui)).toEqual({ ready: 3, blocked: 1, closed: 1 })
       await ui.unmount()
     })
 
@@ -143,7 +143,7 @@ for (const backend of BACKENDS) {
       await ui.press({ key: 'back' })
 
       await ui.press({ key: `action:${backend.spec}` })
-      expect(fills[0]).toMatch(/^\/implement-spec /)
+      expect(fills[0]).toMatch(/^\/implement-spec\n/)
       await ui.unmount()
     })
 
@@ -158,7 +158,7 @@ for (const backend of BACKENDS) {
       expect(shown).toContain('A button.')
       expect(shown).toContain('PDF renderer')
       await ui.press({ key: `action:${backend.blocked}` })
-      expect(fills[0]).toMatch(/^\/implement /)
+      expect(fills[0]).toMatch(/^\/implement\n/)
 
       await ui.press({ key: `blocker:${backend.blocker}` })
       expect(await texts(ui)).toContain('Implementation: PDF renderer')
@@ -202,14 +202,14 @@ for (const surface of SURFACES) {
   })
 
   for (const [failure, message] of FAILURES) {
-    test(`a ${failure} gh failure shows its message and names Env Check on ${surface}`, async ($, on) => {
+    test(`a ${failure} gh failure shows its message and names Checks on ${surface}`, async ($, on) => {
       serveFiles(on, { ...GITHUB_DOC })
       serveGh(on, { fail: failure })
       const ui = await mount($, surface)
       const shown = await texts(ui)
 
       expect(shown).toContainEqual(expect.stringMatching(message))
-      expect(shown).toContainEqual(expect.stringMatching(/Env Check/))
+      expect(shown).toContainEqual(expect.stringMatching(/Checks/))
       await ui.unmount()
     })
   }

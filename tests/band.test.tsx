@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boardCounts, buttonLabels, cardTexts, isOn } from './board-text'
+import { listCounts, buttonLabels, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -102,12 +102,12 @@ const serveCommand = (on: On) => {
 }
 
 for (const surface of SURFACES) {
-  test(`the band's counts match the Board on ${surface}`, async ($, on) => {
+  test(`the band's counts match the List on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const band = await mountBand($, surface)
     const pane = await mountPane($, surface)
 
-    expect(await boardCounts(pane)).toEqual({ claimable: 3, blocked: 1, closed: 1 })
+    expect(await listCounts(pane)).toEqual({ ready: 3, blocked: 1, closed: 1 })
     const shown = await buttonLabels(band)
     expect(shown).toContain('Ready 3')
     expect(shown).toContain('Bug 1')
@@ -130,9 +130,9 @@ for (const surface of SURFACES) {
     expect((await cardTexts(pane)).some(t => /Download button/.test(t))).toBe(false)
     await pane.unmount()
 
-    await band.press({ key: 'count:claimable' })
+    await band.press({ key: 'count:ready' })
     pane = await mountPane($, surface)
-    expect(await isOn(pane, 'filter:claimable')).toBe(true)
+    expect(await isOn(pane, 'filter:ready')).toBe(true)
     await pane.unmount()
 
     await band.press({ key: 'count:needs-triage' })
@@ -147,14 +147,14 @@ for (const surface of SURFACES) {
     await band.unmount()
   })
 
-  test(`a count leaves a Ticket detail or another tab for the Board on ${surface}`, async ($, on) => {
+  test(`a count leaves a Ticket detail or another tab for the List on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     serveBox(on)
     const band = await mountBand($, surface)
     const pane = await mountPane($, surface)
     await pane.press({ key: 'tab:skills' })
 
-    await band.press({ key: 'count:claimable' })
+    await band.press({ key: 'count:ready' })
 
     expect(await keys(pane)).toContain('refresh')
     await pane.unmount()
@@ -196,20 +196,20 @@ for (const surface of SURFACES) {
     const pane = await mountPane($, surface)
 
     await pane.press({ key: 'pane-bug' })
-    for (const key of ['handoff', 'continue', 'fixate']) await band.press({ key })
+    for (const key of ['handoff', 'continue', 'consolidate']) await band.press({ key })
 
     expect(log.fills).toHaveLength(4)
-    const [bug, handoff, resume, fixate] = log.fills
+    const [bug, handoff, resume, consolidate] = log.fills
     expect(bug).toMatch(/^\/wayfinder/)
     expect(bug).toMatch(/duplicate/i)
     expect(bug).toContain('bug')
     expect(bug).toContain('needs-triage')
     expect(handoff).toMatch(/^\/handoff/)
     expect(resume).toMatch(/handoff file/i)
-    expect(fixate).toMatch(/settled/i)
-    expect(fixate).toMatch(/omission/i)
-    expect(fixate).toMatch(/wait/i)
-    expect(fixate).toMatch(/save/i)
+    expect(consolidate).toMatch(/settled/i)
+    expect(consolidate).toMatch(/omission/i)
+    expect(consolidate).toMatch(/wait/i)
+    expect(consolidate).toMatch(/save/i)
     expect(log.submitted).toBe(0)
     await band.unmount()
   })

@@ -41,7 +41,7 @@ const serve = (on: On, files: Record<string, string>, timers?: string[]) => {
 }
 
 for (const surface of SURFACES) {
-  test(`turn.complete updates the Board from a changed file on ${surface}`, async ($, on) => {
+  test(`turn.complete updates the List from a changed file on ${surface}`, async ($, on) => {
     const files = { ...MARKDOWN_TRACKER }
     serve(on, files)
     await turnComplete($)
@@ -57,7 +57,7 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`the Board does not re-read the tracker until a refresh on ${surface}`, async ($, on) => {
+  test(`the List does not re-read the tracker until a refresh on ${surface}`, async ($, on) => {
     const files = { ...MARKDOWN_TRACKER }
     serve(on, files)
     await turnComplete($)

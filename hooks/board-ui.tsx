@@ -3,6 +3,7 @@ import type { ElementTable } from 'claude-code'
 import type { BoardItem, Kind } from '../types'
 import type { Derived } from './derive'
 import { cssColor, type Colors } from './palette'
+import { DSH } from './theme'
 
 /** The elements every surface draws; `Svg` is the desktop's alone, so it comes apart. */
 export type Elements = ElementTable
@@ -11,36 +12,36 @@ export type SvgElement = ElementTable<'desktop'>['Svg'] | undefined
 type KindStyle = { name: string; icon: string; color: string }
 
 export const KIND_STYLES: Record<Kind, KindStyle> = {
-  map: { name: 'Map', icon: '◈', color: '#a371f7' },
-  spec: { name: 'Spec', icon: '▤', color: '#58a6ff' },
-  implementation: { name: 'Implementation', icon: '▸', color: '#3fb950' },
-  research: { name: 'Research', icon: '⌕', color: '#58a6ff' },
-  prototype: { name: 'Prototype', icon: '◇', color: '#39c5cf' },
-  grilling: { name: 'Grilling', icon: '?', color: '#d2a8ff' },
-  task: { name: 'Task', icon: '▸', color: '#3fb950' },
-  bug: { name: 'Bug', icon: '✱', color: '#f85149' },
-  plain: { name: 'Ticket', icon: '○', color: '#8b949e' },
+  map: { name: 'Map', icon: '◈', color: DSH.map },
+  spec: { name: 'Spec', icon: '▤', color: DSH.spec },
+  implementation: { name: 'Implementation', icon: '▸', color: DSH.task },
+  research: { name: 'Research', icon: '⌕', color: DSH.research },
+  prototype: { name: 'Prototype', icon: '◇', color: DSH.prototype },
+  grilling: { name: 'Grilling', icon: '?', color: DSH.grilling },
+  task: { name: 'Task', icon: '▸', color: DSH.task },
+  bug: { name: 'Bug', icon: '✱', color: DSH.bug },
+  plain: { name: 'Ticket', icon: '○', color: DSH.muted },
 }
 
 export const KIND_NAMES = Object.fromEntries(
   Object.entries(KIND_STYLES).map(([kind, style]) => [kind, style.name]),
 ) as Record<Kind, string>
 
-export type Status = 'closed' | 'blocked' | 'claimed' | 'claimable' | 'open'
+export type Status = 'closed' | 'blocked' | 'claimed' | 'ready' | 'open'
 
 export const STATUS_STYLES: Record<Status, { name: string; icon: string; color: string }> = {
-  closed: { name: 'Closed', icon: '✓', color: '#8b949e' },
-  blocked: { name: 'Blocked', icon: '⊘', color: '#f85149' },
-  claimed: { name: 'Claimed', icon: '●', color: '#d29922' },
-  claimable: { name: 'Claimable', icon: '◎', color: '#3fb950' },
-  open: { name: 'Open', icon: '○', color: '#3fb950' },
+  closed: { name: 'Closed', icon: '✓', color: DSH.muted },
+  blocked: { name: 'Blocked', icon: '⊘', color: DSH.bad },
+  claimed: { name: 'Claimed', icon: '●', color: DSH.warn },
+  ready: { name: 'Ready', icon: '◎', color: DSH.ok },
+  open: { name: 'Open', icon: '○', color: DSH.ok },
 }
 
 export const statusOf = (item: BoardItem, derived: Derived): Status => {
   if (item.state === 'closed') return 'closed'
   if (derived.blocked.has(item.path)) return 'blocked'
   if (item.claimed) return 'claimed'
-  if (derived.claimable.has(item.path)) return 'claimable'
+  if (derived.ready.has(item.path)) return 'ready'
   return 'open'
 }
 
@@ -62,19 +63,17 @@ const ACTION_ICONS: Record<string, string> = {
 
 export const actionText = (name: string): string => `${ACTION_ICONS[name] ?? '▶'} ${name}`
 
-const GREY = '#30363d'
-
 /** Black or white, whichever reads on `hex`. */
 const inkOn = (hex: string): string => {
   const value = Number.parseInt(hex.replace('#', ''), 16)
   const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255]
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#000000' : '#ffffff'
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? DSH.inkDark : DSH.inkLight
 }
 
 /** A label as GitHub draws one: its colour behind, readable ink on top. */
 export const labelPill = ({ Text }: Elements, colors: Colors, label: string, key: string) => {
   const hex = colors[label]
-  const background = hex === undefined ? GREY : cssColor(hex)
+  const background = hex === undefined ? DSH.labelFallback : cssColor(hex)
   return (
     <Text key={key} backgroundColor={background} color={inkOn(background)} size="footnote" weight="medium">
       {` ${label} `}
@@ -94,13 +93,13 @@ export const progressMark = (
 ) => {
   const share = total === 0 ? 0 : closed / total
   const done = total > 0 && closed === total
-  const ink = done ? STATUS_STYLES.claimable.color : color
+  const ink = done ? STATUS_STYLES.ready.color : color
   const glyph = done ? '●' : share >= 0.75 ? '◕' : share >= 0.5 ? '◑' : share > 0 ? '◔' : '○'
   return (
     <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
       {Svg ? (
         <Svg
-          source={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="none" stroke="#484f58" stroke-width="3"/><circle cx="9" cy="9" r="7" fill="none" stroke="${ink}" stroke-width="3" stroke-dasharray="${(share * RING).toFixed(2)} ${RING.toFixed(2)}" transform="rotate(-90 9 9)"/></svg>`}
+          source={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="none" stroke="${DSH.labelFallback}" stroke-width="3"/><circle cx="9" cy="9" r="7" fill="none" stroke="${ink}" stroke-width="3" stroke-dasharray="${(share * RING).toFixed(2)} ${RING.toFixed(2)}" transform="rotate(-90 9 9)"/></svg>`}
           alt={`${closed} of ${total} done`}
           width={16}
           height={16}

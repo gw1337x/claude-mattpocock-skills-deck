@@ -6,7 +6,7 @@ import {
   BUG_PROMPT,
   CONTINUE_PROMPT,
   containerAction,
-  FIXATE_PROMPT,
+  CONSOLIDATE_PROMPT,
   HANDOFF_PROMPT,
   HEALTH_CHECK_PROMPT,
   NEW_MAP_PROMPT,
@@ -25,10 +25,11 @@ import {
   statusOf,
   statusTag,
 } from './board-ui'
-import { allLabels, DEFAULT_VIEW, derive, visibleItems, type Derived } from './derive'
+import { allLabels, DEFAULT_VIEW, derive, progressText, visibleItems, type Derived } from './derive'
 import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
+  GH_LIST_LIMIT,
   GhError,
   postGithubComment,
   readGithubDetail,
@@ -37,17 +38,22 @@ import {
 } from './github-tracker'
 import {
   COLORS_FILE,
+  COLORS_YAML_FILE,
   colorOf,
   parseColor,
   readGithubColors,
   readMarkdownColors,
   saveGithubColor,
   withSavedColor,
+  withSavedYamlColor,
   type Colors,
 } from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
+import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
+import { DECK_READS, DECK_TOOLS, deckContext, DeckRefusal, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
+import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
 import { ago, itemFor, othersLine, ownRoute, prune, touchOf, type RouteEntry } from './work-route'
 
@@ -70,8 +76,14 @@ const fillPrompt = async ($: Engine, text: string, title?: string | null) => {
   await $.state.set(FILLED, isFilled && title !== undefined ? { text, title } : null)
 }
 
-/** The first line of a prompt: the slash command and the ticket it names. */
-const headOf = (text: string) => text.split(/\r?\n/)[0]?.trim() ?? ''
+/** The first two lines of a prompt: the slash command and the ticket it names, which DSH's templates put on separate lines. */
+const headOf = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .slice(0, 2)
+    .join('\n')
 
 const DRAFT_WORDS = 5
 const draftTitle = (text: string) =>
@@ -154,18 +166,37 @@ const readRoute = async ($: Engine): Promise<RouteEntry[]> => {
   }
 }
 
-/** The person's override for this repo if there is one, else what the tracker doc names, else Markdown. */
-const resolveBackend = async ($: Engine): Promise<Backend> => {
+/** The person's override for this repo if there is one, else `workspace.yaml`, else what the tracker doc names; null when none names one. */
+const findBackend = async ($: Engine): Promise<FoundBackend | null> => {
   try {
     const stored = await $.store.get(await overrideKey($))
-    if (stored === 'github' || stored === 'markdown') return stored
+    if (stored === 'github' || stored === 'markdown') return { backend: stored, source: 'override' }
   } catch {
     // No store: detection decides.
   }
   try {
-    return detectBackend(await $.fs.read(TRACKER_DOC)) ?? 'markdown'
+    const workspace = readWorkspace(await $.fs.read(WORKSPACE_FILE)).backend
+    if (workspace !== null) return { backend: workspace, source: 'workspace.yaml' }
   } catch {
-    return 'markdown'
+    // No workspace.yaml: the tracker doc decides.
+  }
+  try {
+    const named = detectBackend(await $.fs.read(TRACKER_DOC))
+    return named === null ? null : { backend: named, source: 'issue-tracker.md' }
+  } catch {
+    return null
+  }
+}
+
+/** The Backend the List draws: as found, else Markdown. */
+const resolveBackend = async ($: Engine): Promise<Backend> => (await findBackend($))?.backend ?? 'markdown'
+
+/** The folder the session works in, for deck_context. */
+const workspaceRoot = async ($: Engine): Promise<string> => {
+  try {
+    return await $.session.root()
+  } catch {
+    return repoKey($)
   }
 }
 
@@ -198,6 +229,40 @@ const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> =>
   }
 }
 
+/** The tracker as a Deck tool reads it: fresh, with a `gh` failure refused to the model. */
+const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
+  const snapshot = await readBoard($, backend)
+  if (snapshot.error !== undefined) throw new DeckRefusal(snapshot.error)
+  return {
+    backend,
+    items: snapshot.items,
+    partial: backend === 'github' && snapshot.items.length >= GH_LIST_LIMIT,
+    detail: async item => {
+      try {
+        if (backend === 'github') return await readGithubDetail(ghRun($), item.number ?? 0)
+        return readTicketDetail(await $.fs.read(item.path))
+      } catch (error) {
+        if (error instanceof GhError) throw new DeckRefusal(error.message)
+        throw new DeckRefusal(`Could not read ${item.path}.`)
+      }
+    },
+  }
+}
+
+/** Answers one Deck tool call; a refusal reaches the model as the call's error. */
+const answerDeckTool = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
+  const found = await findBackend($)
+  if (name === 'deck_context') {
+    // Naming a GitHub Backend needs no read, so a `gh` failure cannot hide it; Markdown is read for its efforts.
+    const items = found?.backend === 'markdown' ? (await readDeck($, 'markdown')).items : []
+    return deckContext(await workspaceRoot($), found, items)
+  }
+  if (found === null) throw new DeckRefusal(NO_BACKEND)
+  const read = DECK_READS[name]
+  if (read === undefined) throw new DeckRefusal(`Unknown deck tool ${name}.`)
+  return read(await readDeck($, found.backend), input)
+}
+
 /** Re-reads the tracker into the session's snapshot, which the Pane draws from. */
 const refresh = async ($: Engine) => {
   try {
@@ -228,7 +293,7 @@ const loadedSkills = async ($: Engine): Promise<string[] | null> => {
   }
 }
 
-/** Runs the Env Check now for this project's Backend; nothing is stored. */
+/** Runs the Checks now for this project's Backend; nothing is stored. */
 const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> =>
   buildChecks(
     backend,
@@ -281,13 +346,13 @@ const freshness = (readAt: number, now: number): string => {
   return minutes < 1 ? 'Updated just now' : `Updated ${minutes} min ago`
 }
 
-/** The status bar's colours, as DSH draws them. */
-const GREEN = '#3fb950'
-const RED = '#f85149'
-const AMBER = '#d29922'
-const PURPLE = '#bc8cff'
-const BLUE = '#58a6ff'
-const GREY_INK = '#8b949e'
+/** The status capsule's colours, from the shared DSH tokens. */
+const GREEN = DSH.ok
+const RED = DSH.bad
+const AMBER = DSH.warn
+const PURPLE = DSH.map
+const BLUE = DSH.link
+const GREY_INK = DSH.muted
 
 /** How old the snapshot may get before the band's time turns red. */
 const STALE_MS = 30 * 60_000
@@ -303,7 +368,7 @@ const FILTERS: [BoardFilter, string][] = [
   ['open', 'Open'],
   ['closed', 'Closed'],
   ['blocked', 'Blocked'],
-  ['claimable', 'Claimable'],
+  ['ready', 'Ready'],
 ]
 const SORTS: [BoardSort, string][] = [
   ['updated', 'Updated'],
@@ -327,11 +392,11 @@ const startNew = async ($: Engine): Promise<boolean> => {
 
 const startBug = ($: Engine) => fillPrompt($, BUG_PROMPT)
 
-/** Shows the Board in the Pane with the view the person asked for. */
+/** Shows the List in the Pane with the view the person asked for. */
 const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) => {
   const current: BoardView = (await $.state.get(BOARD_VIEW)).value ?? DEFAULT_VIEW
   await $.state.set(BOARD_VIEW, { ...current, ...view })
-  await $.state.set(TAB, 'board')
+  await $.state.set(TAB, 'list')
   await $.state.set(DETAIL, null)
   await $.ui.open({ id: PANE, title: PANE_TITLE })
 }
@@ -364,11 +429,23 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'deck',
-      description: 'Open the Skills Deck board beside the chat',
+      description: 'Open the Skills Deck list beside the chat',
     })
+    for (const tool of DECK_TOOLS) await $.tool.register(tool)
 
     return next(e)
   })
+
+  for (const tool of DECK_TOOLS) {
+    on('tool.call', { tool: `mcp__mattpocock-skills-deck__${tool.name}` }, async ($, e) => {
+      try {
+        return { result: JSON.stringify(await answerDeckTool($, tool.name, e), null, 2) }
+      } catch (error) {
+        if (error instanceof DeckRefusal) return { deny: error.message }
+        throw error
+      }
+    })
+  }
 
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
@@ -423,7 +500,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
-    const { claimable, bugs, needsTriage } = derive(snapshot.items).counts
+    const { ready, bugs, needsTriage } = derive(snapshot.items).counts
     const menuOpen = (await $.state.get(SKILLS_MENU)).value ?? false
     const loaded = menuOpen ? await loadedSkills($) : []
     const installed = installedMattSkills(loaded ?? [])
@@ -435,7 +512,7 @@ export const register: Register = on => {
     const mine = ownRoute(entries, session, now)
     const others = othersLine(entries, session, now)
     const latest = mine[0]
-    // Only a score the Env Check already worked out; the band never runs the checks itself.
+    // Only a score the Checks already worked out; the band never runs the checks itself.
     const envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
     const env = envChecks === null ? null : scoreOf(envChecks)
     const envColor = env === null ? GREY_INK : env.passed === env.total ? GREEN : AMBER
@@ -454,7 +531,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
         {routeOpen && (
-          <Box key="route-panel" flexDirection="column" borderStyle="round" borderColor="#30363d" padding="sm" rowGap="xs">
+          <Box key="route-panel" flexDirection="column" borderStyle="round" borderColor={DSH.border} padding="sm" rowGap="xs">
             <Box flexDirection="row" justifyContent="space-between" flexWrap="wrap" columnGap="md">
               <Box flexDirection="row" columnGap="sm">
                 <Text weight="semibold">Work Route</Text>
@@ -474,21 +551,21 @@ export const register: Register = on => {
                 plain
                 onPress={async () => {
                   if (entry.path === null) return
-                  await $.state.set(TAB, 'board')
+                  await $.state.set(TAB, 'list')
                   await $.state.set(DETAIL, entry.path)
                   await $.ui.open({ id: PANE, title: PANE_TITLE })
                 }}
               >
                 <Text color={BLUE} mono weight="semibold">{`#${entry.ticket} `}</Text>
                 <Text>{`${entry.title} `}</Text>
-                <Text backgroundColor="#30363d" color="#c9d1d9" size="footnote">{` ${entry.action} `}</Text>
+                <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${entry.action} `}</Text>
                 <Text dimColor size="footnote">{`  ${ago(entry.time, now)}`}</Text>
               </Button>
             ))}
           </Box>
         )}
         {menuOpen && (
-          <Box key="skills-panel" flexDirection="column" borderStyle="round" borderColor="#30363d" padding="sm" rowGap="xs">
+          <Box key="skills-panel" flexDirection="column" borderStyle="round" borderColor={DSH.border} padding="sm" rowGap="xs">
             <Text weight="semibold">Matt skills</Text>
             <Box flexDirection="row" flexWrap="wrap" columnGap="xs" rowGap="xs">
               {loaded === null && <Text>Could not read the installed skills.</Text>}
@@ -508,11 +585,11 @@ export const register: Register = on => {
           alignItems="center"
           columnGap="md"
           borderStyle="round"
-          borderColor="#30363d"
+          borderColor={DSH.border}
           paddingX="md"
           paddingY="xs"
         >
-          {item('open-deck', 'Skills Deck', '#c9d1d9', () => openBoard($, { filter: 'all', chips: [] }), '◷')}
+          {item('open-deck', 'Skills Deck', DSH.text, () => openBoard($, { filter: 'all', chips: [] }), '◷')}
           {item(
             'route',
             latest ? `Work Route #${latest.ticket}` : 'Work Route',
@@ -521,7 +598,7 @@ export const register: Register = on => {
             '⌖',
             latest ? `#${latest.ticket}` : 'Route',
           )}
-          {item('count:claimable', `Ready ${claimable}`, GREEN, () => openBoard($, { filter: 'claimable', chips: [] }), '⊙', 'Ready', claimable)}
+          {item('count:ready', `Ready ${ready}`, GREEN, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', 'Ready', ready)}
           {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', 'BUG', bugs)}
           {item(
             'count:needs-triage',
@@ -532,17 +609,17 @@ export const register: Register = on => {
             'Triage',
             needsTriage,
           )}
-          {!collapsed && item('fixate', 'Consolidate', PURPLE, () => fillPrompt($, FIXATE_PROMPT), '▤', 'Consolidate')}
+          {!collapsed && item('consolidate', 'Consolidate', PURPLE, () => fillPrompt($, CONSOLIDATE_PROMPT), '▤', 'Consolidate')}
           {!collapsed && item('handoff', 'Handoff', BLUE, () => fillPrompt($, HANDOFF_PROMPT), '⇆', 'Handoff')}
           {!collapsed && item('continue', 'Continue from a handoff', BLUE, () => fillPrompt($, CONTINUE_PROMPT), '⎘')}
           {!collapsed &&
             item(
-              'env',
-              env === null ? 'Env Check' : `Env ${env.passed}/${env.total}`,
+              'checks',
+              env === null ? 'Checks' : `Checks ${env.passed}/${env.total}`,
               envColor,
               async () => {
                 await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
-                await $.state.set(TAB, 'env')
+                await $.state.set(TAB, 'checks')
                 await $.state.set(DETAIL, null)
                 await $.ui.open({ id: PANE, title: PANE_TITLE })
               },
@@ -579,10 +656,10 @@ export const register: Register = on => {
     }
     const backend = await resolveBackend($)
     const prsShown = await hasGithubRemote(ghRun($))
-    const stored = (await $.state.get(TAB)).value ?? 'board'
-    const tab = stored === 'prs' && !prsShown ? 'board' : stored
-    // Only the Board and the Palette draw label colours.
-    const colors: Colors = tab === 'board' || tab === 'palette' ? await readColors($, backend) : {}
+    const stored = (await $.state.get(TAB)).value ?? 'list'
+    const tab = stored === 'prs' && !prsShown ? 'list' : stored
+    // Only the List and the Palette draw label colours.
+    const colors: Colors = tab === 'list' || tab === 'palette' ? await readColors($, backend) : {}
     // A Container's Action depends on its children; every other item's on the ladder alone.
     const actionOf = (item: BoardItem, all: BoardItem[]) =>
       isContainer(item) ? containerAction(item, childrenOf(all, item.path)) : actionFor(item)
@@ -610,10 +687,10 @@ export const register: Register = on => {
           flexDirection="column"
           flexShrink={0}
           borderStyle="round"
-          borderColor={closed ? '#484f58' : kind.color}
+          borderColor={closed ? DSH.borderQuiet : kind.color}
           padding="sm"
           rowGap="xs"
-          hover={{ borderColor: '#c9d1d9' }}
+          hover={{ borderColor: DSH.text }}
         >
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap="sm">
             <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="sm" flexShrink={1}>
@@ -644,6 +721,9 @@ export const register: Register = on => {
               <Link href={item.url ?? item.path}>↗</Link>
             </Box>
           </Box>
+          {!isContainer(item) && (
+            <Text dimColor size="footnote">{progressText(item)}</Text>
+          )}
           {item.warning && <Text color={STATUS_STYLES.blocked.color} size="footnote">{`⚠ ${item.warning}`}</Text>}
         </Box>
       )
@@ -671,16 +751,16 @@ export const register: Register = on => {
     }
 
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
-    const TABS: ['board' | 'skills' | 'prs' | 'env', string][] = [
-      ['board', '☰ Board'],
+    const TABS: ['list' | 'skills' | 'prs' | 'checks', string][] = [
+      ['list', '☰ List'],
       ['skills', '◎ Skills'],
       ...(prsShown ? [['prs', '⇄ PRs'] as ['prs', string]] : []),
-      ['env', '✲ Env Check'],
+      ['checks', '✲ Checks'],
     ]
     const tabBar = (
       <Box flexDirection="column" flexShrink={0} rowGap="sm" marginBottom="md">
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="md">
-          <Text color="#58a6ff" weight="semibold" mono>{`⌂ ${await repoName($)}`}</Text>
+          <Text color={DSH.link} weight="semibold" mono>{`⌂ ${await repoName($)}`}</Text>
           <Box flexDirection="row" columnGap="xs">
             <Button key="pane-new" label="New" onPress={() => startNew($)}>
               <Text color={KIND_STYLES.map.color}>◈ New ▾</Text>
@@ -698,7 +778,7 @@ export const register: Register = on => {
               variant={tab === id ? 'primary' : undefined}
               dimColor={tab !== id}
               onPress={async () => {
-                if (id === 'env') await recheck()
+                if (id === 'checks') await recheck()
                 await $.state.set(TAB, id)
               }}
             />
@@ -722,8 +802,13 @@ export const register: Register = on => {
           if (backend === 'github') {
             await saveGithubColor(ghRun($), label, hex)
           } else {
-            const existing = await $.fs.read(COLORS_FILE).catch(() => null)
-            await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
+            const yaml = await $.fs.read(COLORS_YAML_FILE).catch(() => null)
+            if (yaml !== null) {
+              await $.fs.write(COLORS_YAML_FILE, withSavedYamlColor(yaml, label, hex))
+            } else {
+              const existing = await $.fs.read(COLORS_FILE).catch(() => null)
+              await $.fs.write(COLORS_FILE, withSavedColor(existing, label, hex))
+            }
           }
           await $.state.set(PALETTE_NOTE, null)
         } catch (error) {
@@ -781,14 +866,14 @@ export const register: Register = on => {
       )
     }
 
-    if (tab === 'env') {
+    if (tab === 'checks') {
       // Drawing is pure: before the first run (the Pane opened on this tab) check live, store nothing.
       const checks = (await $.state.get(ENV_CHECKS)).value ?? (await runEnvChecks($, backend))
       const { passed, total } = scoreOf(checks)
       return (
         <Box flexDirection="column">
           {tabBar}
-          <Text bold>{`Env Check ${passed}/${total}`}</Text>
+          <Text bold>{`Checks ${passed}/${total}`}</Text>
           <Box>
             <Button
               key="recheck"
@@ -938,7 +1023,7 @@ export const register: Register = on => {
       )
     }
 
-    const { claimable, blocked, closed } = derivedItems.counts
+    const { ready, blocked, closed } = derivedItems.counts
     const cards = visibleItems(items, derivedItems, view)
     const chip = (key: string, label: string, active: boolean, onPress: () => unknown, color?: string) => (
       <Button key={key} label={label} variant={active ? 'primary' : undefined} onPress={onPress}>
@@ -954,7 +1039,7 @@ export const register: Register = on => {
         {tabBar}
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="md">
           <Box key="counts" flexDirection="row" columnGap="md">
-            <Text color={STATUS_STYLES.claimable.color} weight="semibold">{`${STATUS_STYLES.claimable.icon} ${claimable} Claimable`}</Text>
+            <Text color={STATUS_STYLES.ready.color} weight="semibold">{`${STATUS_STYLES.ready.icon} ${ready} Ready`}</Text>
             <Text color={STATUS_STYLES.blocked.color} weight="semibold">{`${STATUS_STYLES.blocked.icon} ${blocked} Blocked`}</Text>
             <Text dimColor>{`${STATUS_STYLES.closed.icon} ${closed} Closed`}</Text>
           </Box>

@@ -1,5 +1,5 @@
 import type { BoardItem } from '../types'
-import { detectKind } from './markdown-tracker'
+import { detectKind, progressField } from './markdown-tracker'
 
 export type RunResult = { exitCode: number; stdout: string; stderr: string }
 /** Runs a command by its argument vector; rejects when it cannot start. */
@@ -17,7 +17,7 @@ export class GhError extends Error {
   }
 }
 
-const ENV_CHECK = 'Open Env Check to fix it.'
+const ENV_CHECK = 'Open Checks to fix it.'
 
 const describeFailure = (stderr: string): GhError => {
   if (/auth login|not logged in|authentication|HTTP 401|gh_token/i.test(stderr)) {
@@ -60,7 +60,7 @@ type Issue = {
   title: string
   state: string
   labels?: { name: string }[]
-  assignees?: unknown[]
+  assignees?: { login?: string }[]
   updatedAt?: string
   url?: string
   body?: string
@@ -79,11 +79,14 @@ const numbersOf = (value: unknown): number[] =>
 
 const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
 
-/** Every issue in the repo as Board items; a Container's sub-issues carry its path as `parent`. */
+/** The most issues one read takes; a read that returns this many may have left some out. */
+export const GH_LIST_LIMIT = 500
+
+/** Every issue in the repo as List items; a Container's sub-issues carry its path as `parent`. */
 export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
   const listed = JSON.parse(
     await runGh(run, [
-      'issue', 'list', '--state', 'all', '--limit', '500',
+      'issue', 'list', '--state', 'all', '--limit', String(GH_LIST_LIMIT),
       '--json', 'number,title,state,labels,assignees,updatedAt,url,body',
     ]),
   ) as Issue[]
@@ -100,9 +103,11 @@ export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
       state: issue.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open',
       path: githubPath(issue.number),
       blockedBy: bodyBlockers(body),
+      assignees: (issue.assignees ?? []).map(assignee => assignee.login ?? ''),
       claimed: (issue.assignees ?? []).length > 0,
       updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
       parent: null,
+      ...progressField(body),
       url: issue.url,
     }
   })

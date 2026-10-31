@@ -1,4 +1,5 @@
 import type { BoardItem, Kind } from '../types'
+import { readProgress } from './derive'
 
 /** The slice of `$.fs` the Markdown tracker needs. */
 export type Fs = {
@@ -8,9 +9,9 @@ export type Fs = {
 }
 
 const SCRATCH = '.scratch'
-const CLOSED_STATUSES = new Set(['resolved', 'wontfix'])
+const CLOSED_STATUSES = new Set(['resolved', 'wontfix', 'closed'])
 /** `Status: resolved` is the closed state itself, so it is not also a label. */
-const STATUS_SHOWN_AS_STATE = 'resolved'
+const STATUSES_SHOWN_AS_STATE = new Set(['resolved', 'closed'])
 /** The kinds a `Type:` line or a `wayfinder:<kind>` label can name. */
 const TYPE_KINDS: Partial<Record<string, Kind>> = {
   research: 'research',
@@ -21,11 +22,14 @@ const TYPE_KINDS: Partial<Record<string, Kind>> = {
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)
 
-/** `Key: value` or `**Key:** value` lines; the first of each key wins. */
+/** The hidden header lines DSH's md-v1 format writes, such as `<!-- DSH-LABELS: bug, needs-triage -->`. */
+const HEADER_LINE = /^<!--\s*(DSH-[A-Z-]+):\s*(.*?)\s*-->\s*$/
+
+/** `Key: value` or `**Key:** value` lines, and md-v1 header lines under their lowercase `dsh-*` name; the first of each key wins. */
 const readFields = (text: string): Map<string, string> => {
   const fields = new Map<string, string>()
   for (const line of text.split(/\r?\n/)) {
-    const match = /^\**([A-Za-z][A-Za-z ]*?):\**\s*(.*)$/.exec(line)
+    const match = HEADER_LINE.exec(line) ?? /^\**([A-Za-z][A-Za-z ]*?):\**\s*(.*)$/.exec(line)
     const key = match?.[1]?.toLowerCase()
     if (match && key !== undefined && !fields.has(key)) {
       fields.set(key, (match[2] ?? '').trim())
@@ -34,7 +38,16 @@ const readFields = (text: string): Map<string, string> => {
   return fields
 }
 
-const readTitle = (text: string): string | null => {
+const splitList = (value: string | undefined): string[] =>
+  (value ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+
+/** The `DSH-TITLE` header when there is one, else the `# ` heading. */
+const readTitle = (text: string, fields: Map<string, string>): string | null => {
+  const headerTitle = fields.get('dsh-title')
+  if (headerTitle) return headerTitle
   const heading = /^# +(.+)$/m.exec(text)
   if (!heading) return null
   return (heading[1] ?? '').replace(/^(?:Map|Spec):\s*/i, '').replace(/^\d+:\s*/, '').trim()
@@ -78,12 +91,18 @@ export const detectKind = (
   return 'plain'
 }
 
+export const progressField = (body: string) => {
+  const progress = readProgress(body)
+  return progress === undefined ? {} : { progress }
+}
+
 /** Parses one tracker file into a Board item; a file that does not parse becomes a plain Ticket with a warning. */
 export const parseItem = (path: string, text: string): BoardItem => {
   const [, feature = '', ...rest] = path.split('/')
   const fileName = rest[rest.length - 1] ?? ''
   const number = readNumber(fileName)
-  const title = readTitle(text)
+  const fields = readFields(text)
+  const title = readTitle(text, fields)
   const hasNulByte = text.includes('\u0000')
 
   if (title === null || hasNulByte) {
@@ -96,6 +115,7 @@ export const parseItem = (path: string, text: string): BoardItem => {
       state: 'open',
       path,
       blockedBy: [],
+      assignees: [],
       claimed: false,
       updated: 0,
       parent: null,
@@ -103,13 +123,19 @@ export const parseItem = (path: string, text: string): BoardItem => {
     }
   }
 
-  const fields = readFields(text)
-  const status = (fields.get('status') ?? '').toLowerCase()
-  const labels = (fields.get('labels') ?? '')
-    .split(',')
-    .map(label => label.trim())
-    .filter(Boolean)
-  if (status !== '' && status !== STATUS_SHOWN_AS_STATE) labels.push(status)
+  const headerStatus = (fields.get('dsh-status') ?? '').toLowerCase()
+  const status = (fields.get('status') || headerStatus).toLowerCase()
+  // DSH cannot reopen, so either place saying closed settles it.
+  const closed = CLOSED_STATUSES.has(status) || CLOSED_STATUSES.has(headerStatus)
+  const labels = [
+    ...new Set([
+      ...splitList(fields.get('labels')),
+      ...splitList(fields.get('dsh-labels')),
+      ...(status !== '' && !STATUSES_SHOWN_AS_STATE.has(status) ? [status] : []),
+    ]),
+  ]
+  const assignees = splitList(fields.get('dsh-assignees'))
+  const blockers = fields.get('dsh-blocked-by') ?? fields.get('blocked by') ?? ''
 
   return {
     kind: detectKind(text, fields, labels, fileName),
@@ -117,10 +143,11 @@ export const parseItem = (path: string, text: string): BoardItem => {
     number,
     feature,
     labels,
-    state: CLOSED_STATUSES.has(status) ? 'closed' : 'open',
+    state: closed ? 'closed' : 'open',
     path,
-    blockedBy: (fields.get('blocked by') ?? '').match(/\d+/g)?.map(Number) ?? [],
-    claimed: status === 'claimed',
+    blockedBy: blockers.match(/\d+/g)?.map(Number) ?? [],
+    assignees,
+    claimed: status === 'claimed' || assignees.length > 0,
     updated: 0,
     parent: null,
   }

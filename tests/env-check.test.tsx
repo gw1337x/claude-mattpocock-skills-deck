@@ -80,7 +80,7 @@ const markdownFiles = () => ({
 })
 
 const rowOf = (shown: string[], label: string) => shown.find(text => text.includes(label))
-const score = (shown: string[]) => shown.find(text => /^Env Check \d+\/\d+$/.test(text))
+const score = (shown: string[]) => shown.find(text => /^Checks \d+\/\d+$/.test(text))
 
 for (const surface of SURFACES) {
   test(`a complete Markdown project scores every applicable check and hides the GitHub ones on ${surface}`, async ($, on) => {
@@ -89,10 +89,10 @@ for (const surface of SURFACES) {
     const gh = serveGh(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
-    expect(score(shown)).toBe('Env Check 4/4')
+    expect(score(shown)).toBe('Checks 4/4')
     expect(shown.join('\n')).not.toContain('gh is')
     expect(gh.calls).toEqual([])
     expect(await keys(ui)).toContain('recheck')
@@ -106,10 +106,10 @@ for (const surface of SURFACES) {
     serveGh(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
-    expect(score(shown)).toBe('Env Check 8/8')
+    expect(score(shown)).toBe('Checks 8/8')
     expect(rowOf(shown, 'gh is logged in')).toMatch(/^✓/)
     await ui.unmount()
   })
@@ -121,7 +121,7 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'gh is installed')).toMatch(/^✗/)
@@ -140,7 +140,7 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'gh is installed')).toMatch(/^✓/)
@@ -157,11 +157,11 @@ for (const surface of SURFACES) {
     serveGh(on, { remote: '' })
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'A GitHub remote is present')).toMatch(/^✗/)
-    expect(score(shown)).toBe('Env Check 7/8')
+    expect(score(shown)).toBe('Checks 7/8')
     await ui.unmount()
   })
 
@@ -172,7 +172,7 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'The workflow labels exist')).toContain('missing needs-info, ready-for-agent, ready-for-human, wontfix')
@@ -190,12 +190,12 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'docs/agents/domain.md')).toMatch(/^✗/)
     expect(rowOf(shown, 'docs/agents/triage-labels.md')).toMatch(/^✓/)
-    expect(score(shown)).toBe('Env Check 3/4')
+    expect(score(shown)).toBe('Checks 3/4')
     await ui.press({ key: 'fix:doc:domain' })
     expect(fills).toEqual(['/setup-matt-pocock-skills'])
     await ui.unmount()
@@ -207,7 +207,7 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     const shown = await texts(ui)
 
     expect(rowOf(shown, 'Matt skills')).toContain('missing to-spec, to-tickets, implement, implement-spec, grill-with-docs, handoff, setup-matt-pocock-skills')
@@ -222,7 +222,7 @@ for (const surface of SURFACES) {
     on('session.usage', () => ({ deny: 'unavailable' }))
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
 
     expect(rowOf(await texts(ui), 'Matt skills')).toContain('could not read the installed skills')
     await ui.unmount()
@@ -236,7 +236,7 @@ for (const surface of SURFACES) {
     const fills = serveBox(on)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
+    await ui.press({ key: 'tab:checks' })
     expect(await keys(ui)).toContain('run-setup')
     await ui.press({ key: 'run-setup' })
 
@@ -251,13 +251,13 @@ for (const surface of SURFACES) {
     serveSkills(on, ALL_SKILLS)
     const ui = await mount($, surface)
 
-    await ui.press({ key: 'tab:env' })
-    expect(score(await texts(ui))).toBe('Env Check 3/4')
+    await ui.press({ key: 'tab:checks' })
+    expect(score(await texts(ui))).toBe('Checks 3/4')
 
     files['docs/agents/domain.md'] = '# Domain\n'
     await ui.press({ key: 'recheck' })
 
-    expect(score(await texts(ui))).toBe('Env Check 4/4')
+    expect(score(await texts(ui))).toBe('Checks 4/4')
     await ui.unmount()
   })
 }

@@ -1090,7 +1090,7 @@ export const register: Register = on => {
   })
 
   // The next reply's pills replace these; until then they stay where the person can pick one.
-  on('tool.call', { tool: `mcp__mattpocock-skills-deck__${SUGGEST_TOOL.name}` }, async ($, e) => {
+  on('tool.call', { tool: [`mcp__mattpocock-skills-deck__${SUGGEST_TOOL.name}`] }, async ($, e) => {
     try {
       const items = suggestionsOf(e)
       await $.state.set(SUGGESTIONS, { items, at: await $.clock.now() })
@@ -1102,7 +1102,7 @@ export const register: Register = on => {
   })
 
   for (const tool of ALL_DECK_TOOLS) {
-    on('tool.call', { tool: `mcp__mattpocock-skills-deck__${tool.name}` }, async ($, e) => {
+    on('tool.call', { tool: [`mcp__mattpocock-skills-deck__${tool.name}`] }, async ($, e) => {
       try {
         return { result: JSON.stringify(await answerDeckTool($, tool.name, e), null, 2) }
       } catch (error) {

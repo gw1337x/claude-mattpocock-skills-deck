@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
@@ -47,7 +48,7 @@ const clean: Changes = { staged: [], unstaged: [], untracked: [], conflicts: [] 
 const tracked = (ahead: number, behind: number): Branch => ({ sync: 'tracked', name: 'main', oid: '', upstream: 'origin/main', ahead, behind })
 
 /** Records every pane the plugin opens, and what it asked of each. */
-const serveOpen = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
+const serveOpen = (on: On) => {
   const opened: { id: string; closeOnEscape?: boolean }[] = []
   const fills: string[] = []
   on('ui.open', (_, e) => {

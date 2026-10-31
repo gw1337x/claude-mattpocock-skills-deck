@@ -1,6 +1,9 @@
 /** The Version control tab's Commits and Worktrees views, sync (fetch, pull, push, upstream), the confirm popover's rules, and "Ask AI to solve it" (inventory F, B15). Every call is an argv. */
+import type { Confirm, SyncAction } from '../types'
 import type { Run } from './github-tracker'
 import { git, GitError, type Changes } from './vc'
+
+export type { Confirm, SyncAction }
 
 /** How the branch stands against its upstream: `unknown` when git would not say. */
 export type Sync = 'tracked' | 'no-upstream' | 'upstream-gone' | 'detached' | 'unknown'
@@ -113,7 +116,6 @@ export const readWorktrees = async (run: Run): Promise<Worktree[]> =>
 
 export const fetchRemote = (run: Run) => git(run, ['fetch'])
 
-export type SyncAction = 'pull' | 'push' | 'set-upstream' | 'recreate-upstream'
 
 const DIVERGED =
   'Remote commits were fetched, but local and remote have diverged; fast-forward is not possible. The panel only fast-forwards: merge or rebase in a command line.'
@@ -182,8 +184,6 @@ export const runSync = async (run: Run, action: SyncAction, branch: Branch): Pro
 
 /** How long a confirm popover stays valid. */
 export const CONFIRM_TTL_MS = 60_000
-
-export type Confirm = { action: SyncAction; at: number }
 
 export const confirmLive = (confirm: Confirm | null | undefined, now: number): confirm is Confirm =>
   confirm != null && now - confirm.at < CONFIRM_TTL_MS

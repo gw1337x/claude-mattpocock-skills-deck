@@ -44,7 +44,7 @@ type Ui = {
 }
 const TEMPLATES = 'docs/agents/templates.yaml'
 declare const setTimeout: (run: () => void, ms: number) => unknown
-const settle = () => new Promise(done => setTimeout(done, 20))
+const settle = () => new Promise<void>(done => setTimeout(() => done(), 20))
 /** Waits (up to 3 s) until the queued log writes have put `text` in a .log file. */
 const logged = async (files: Record<string, string>, text: string) => {
   for (let i = 0; i < 150; i++) {

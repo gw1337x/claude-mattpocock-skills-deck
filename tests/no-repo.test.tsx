@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
@@ -28,7 +29,7 @@ const mount = ($: Engine, surface: Surface, requestId = 'deck') => $.ui.mount(pa
 const texts = async (ui: Ui) => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
 const keys = async (ui: Ui) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '')
 
-const serveBox = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
+const serveBox = (on: On) => {
   const held: Record<string, unknown> = {}
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
   on('prompt.fill', () => ({ isFilled: true }))

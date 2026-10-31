@@ -38,7 +38,7 @@ const texts = async (ui: Ui) => (await ui.findAll({ type: 'Text' })).map(t => t.
 const keys = async (ui: Ui) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '')
 
 /** The prompt box, an in-memory store and the Panes opening and closing. */
-const serveBox = (on: On, skills: string[] = ALL) => {
+const serveBox = (on: On, skills: string[] = ALL, opens: string[] = []) => {
   const fills: string[] = []
   const held: Record<string, unknown> = {}
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
@@ -51,7 +51,10 @@ const serveBox = (on: On, skills: string[] = ALL) => {
     held[e.key] = e.value
     return { value: undefined }
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    opens.push(e.id)
+    return { value: { isPlaced: true } }
+  })
   on('ui.close', () => ({ value: undefined }))
   on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { window: 1, breakdown: { skills: { skillFrontmatter: skills.map(name => ({ name, source: 'userSettings', tokens: 1 })) } } } } }) as never)
   return fills
@@ -203,6 +206,24 @@ for (const surface of SURFACES) {
 
     const ui = await mountBand($, surface)
     expect(guideOf(await texts(ui))).toBe(GUIDE_TEXTS.remote)
+    await ui.unmount()
+  })
+
+  test(`the no-remote banner's button opens Create and publish and fills nothing on ${surface}`, async ($, on) => {
+    serveFiles(on, GITHUB)
+    serveGh(on, { remote: '' })
+    const opens: string[] = []
+    const fills = serveBox(on, ALL, opens)
+    const checks = await mountPane($, surface)
+    await checks.press({ key: 'tab:checks' })
+    await checks.unmount()
+
+    const ui = await mountBand($, surface)
+    expect(guideOf(await texts(ui))).toBe(GUIDE_TEXTS.remote)
+    await ui.press({ key: 'guide-action' })
+
+    expect(fills).toEqual([])
+    expect(opens).toEqual(['publish'])
     await ui.unmount()
   })
 

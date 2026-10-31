@@ -1212,11 +1212,10 @@ export const register: Register = on => {
     const guide = nextGuide(chosen, envChecks)
     const guideShown = guide !== null && !(await readGuideFolded($)).includes(guide.step) ? guide : null
     const guideAction = async (step: GuideStepId) => {
-      const fixOf = (id: string) => envChecks?.find(check => check.id === id)?.fix ?? ''
       if (step === 'backend') return openGate($)
       if (step === 'gh-cli') return fillPrompt($, CLI_INSTALL)
       if (step === 'gh-auth') return fillPrompt($, GH_AUTH_LOGIN)
-      if (step === 'remote') return fillPrompt($, fixOf('github-remote'))
+      if (step === 'remote') return openPublish($)
       if (step === 'setup') return fillPrompt($, setupRun(backend, await readLayout($)))
       return fillPrompt($, installSkills())
     }

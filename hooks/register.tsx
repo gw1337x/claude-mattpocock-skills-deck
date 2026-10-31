@@ -1398,7 +1398,7 @@ export const register: Register = on => {
         ) : (
           <Box key="status-capsule" flexDirection="column" flexShrink={0}>
             <Box
-              key="status-bar"
+              key="status-capsule"
               flexDirection="row"
               flexWrap="nowrap"
               justifyContent="space-between"

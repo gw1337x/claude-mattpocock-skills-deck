@@ -18,6 +18,7 @@ import {
 import {
   STATUS_LABELS,
   applyPatch,
+  bodyOf,
   bodyWithWords,
   hashOf,
   overLimit,
@@ -25,7 +26,6 @@ import {
   readHeader,
   renderFile,
   slugOf,
-  splitRegions,
   withBlockers,
   withParent,
   type NewFile,
@@ -394,7 +394,7 @@ export const deckIssuePatch = async (tracker: DeckTracker, input: Record<string,
 
   const before = await files.read(item.path)
   const after = applyPatch(before, patch, container)
-  refuseOversize(splitRegions(after).body)
+  refuseOversize(bodyOf(after))
   await files.write(item.path, after)
   return reread(tracker, item.path, { changed: Object.keys(patch).filter(field => field !== 'when') })
 }

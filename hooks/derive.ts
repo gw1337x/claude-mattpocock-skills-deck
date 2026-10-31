@@ -108,7 +108,7 @@ export const allLabels = (items: BoardItem[]): string[] =>
 
 /** The percentage in a body's `## Progress` (or `## Progress: N%`) section: the heading's, else the newest entry's; undefined without one. */
 export const readProgress = (body: string): number | undefined => {
-  const section = /^## Progress\b([^\n]*)\n?([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(body)
+  const section = /^## (?:Progress|进度)(?![A-Za-z])([^\n]*)\n?([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(body)
   if (!section) return undefined
   const percent = /(\d{1,3})\s*%/.exec(section[1] ?? '') ?? /(\d{1,3})\s*%/.exec(section[2] ?? '')
   return percent ? Math.min(100, Number(percent[1])) : undefined

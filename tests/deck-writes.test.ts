@@ -17,6 +17,7 @@ const call = async ($: Engine, name: string, input: Record<string, unknown> = {}
 
 const NOW = Date.UTC(2026, 9, 31, 10, 0, 0)
 const ISO = '2026-10-31T10:00:00.000Z'
+const PROGRESS_TIME = '2026-10-31T10:00:00+00:00'
 
 /** A Markdown workspace whose clock is set, and the files the tools write into (read back by the test). */
 const serve = async (on: On, extra: Record<string, string> = {}) => {
@@ -124,9 +125,9 @@ test('deck_issue_create writes a Map ticket, with its label, blockers and assign
       header('PARENT', '00'),
       header('LABELS', 'wayfinder:grilling'),
       header('BLOCKED-BY', '01'),
-      header('ASSIGNEES', 'sam'),
       header('IDEMPOTENCY-KEY', 'k3'),
       header('CREATED', ISO),
+      header('ASSIGNEES', 'sam'),
       '# 03: Pick a payment form',
       '',
       '**Blocked by:** 01',
@@ -269,7 +270,13 @@ test('deck_issue_patch adds Progress entries newest first', async ($, on) => {
   const patched = await call($, 'deck_issue_patch', { key: 'readings/03', progress: { percent: 60 } })
 
   expect(files[path]).toContain(
-    `**What to build:** capacity read for real.\n\n## Progress: 60%\n\n- 60% · ${ISO}\n- 30% · ${ISO} · Reader done\n\n**Blocked by:** 02`,
+    `**Status:** ready-for-agent
+
+## 进度
+
+- 进度：60%（${PROGRESS_TIME}）
+- 进度：30%（${PROGRESS_TIME}）：Reader done
+`,
   )
   expect(patched.progress).toBe('In progress 60%')
   expect((await call($, 'deck_issue_patch', { key: 'readings/03', progress: { percent: 101 } })).error).toMatch(/0 to 100/)
@@ -289,7 +296,7 @@ test('deck_issue_patch only adds to the original words, and a rewrite keeps them
   const text = files[path]!
   expect(text).toContain('New body.')
   expect(text).toContain("## Maintainer's original words\n\n> First\nSource: a\n\n> Second")
-  expect(text).toContain('## Progress: 10%')
+  expect(text).toContain('- 进度：10%')
   expect(text).not.toContain('Replaced')
 })
 
@@ -536,4 +543,59 @@ test('a workspace with no Backend refuses the write tools like the read ones', a
   serveFiles(on, { 'README.md': '# A repo\n' })
 
   expect((await call($, 'deck_issue_create', { title: 'x', kind: 'issue' })).error).toMatch(/no backend/i)
+})
+
+/** A ticket DSH wrote in a real repo: fields mid-body, assignees after CREATED, Comments ahead of the Chinese 进度 section. */
+const DSH_TICKET = [
+  '<!-- DSH-FORMAT: md-v1 -->',
+  '<!-- DSH-PARENT: 00 -->',
+  '<!-- DSH-LABELS: ready-for-agent -->',
+  '<!-- DSH-BLOCKED-BY: 03 -->',
+  '<!-- DSH-IDEMPOTENCY-KEY: deck-c4dc0b06-5977156 -->',
+  '<!-- DSH-CREATED: 2026-10-28T00:23:11.119Z -->',
+  '<!-- DSH-ASSIGNEES: jock -->',
+  '# 04: Chrome from the loadout',
+  '',
+  '**What to build:** the equipped chrome list.',
+  '',
+  '**Blocked by:** 03',
+  '',
+  '**Status:** resolved',
+  '',
+  '- [x] A fixture produces them.',
+  '',
+  '## Comments',
+  '',
+  '### local — 2026-10-28T19:27:12.255Z',
+  'Chrome is read.',
+  '',
+  '## 进度',
+  '',
+  '- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome read from the loadout',
+  '',
+].join('\n')
+
+test('a ticket DSH wrote keeps its layout: a comment lands in Comments, a Progress entry on top of 进度', async ($, on) => {
+  const path = '.scratch/netrunner/issues/04-chrome.md'
+  const files = await serve(on, { [path]: DSH_TICKET })
+  await call($, 'deck_issue_patch', { key: 'netrunner/04', comment: 'Checked again.', progress: { percent: 100, note: 'Verified' } })
+
+  expect(files[path]).toBe(
+    DSH_TICKET.replace('\n## 进度', `\n### local, ${ISO}\nChecked again.\n\n## 进度`).replace(
+      '- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome',
+      `- 进度：100%（${PROGRESS_TIME}）：Verified\n- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome`,
+    ),
+  )
+})
+
+test('a ticket DSH wrote reads its 进度 percent, and a body rewrite keeps its fields, comments and Progress', async ($, on) => {
+  const path = '.scratch/netrunner/issues/04-chrome.md'
+  const files = await serve(on, { [path]: DSH_TICKET.replace('**Status:** resolved', '**Status:** ready-for-agent') })
+  const got = await call($, 'deck_issue_get', { key: 'netrunner/04' })
+  await call($, 'deck_issue_patch', { key: 'netrunner/04', body: 'Rewritten.' })
+
+  expect(got.progress).toBe('100% · acceptance')
+  expect(files[path]).toContain('Rewritten.\n\n**Blocked by:** 03\n\n**Status:** ready-for-agent\n\n## Comments')
+  expect(files[path]).not.toContain('A fixture produces them')
+  expect(files[path]).toContain('- 进度：100%（2026-10-28T19:27:07+00:00）')
 })

@@ -11,16 +11,17 @@ const HEADER_ORDER = [
   'DSH-PARENT',
   'DSH-LABELS',
   'DSH-BLOCKED-BY',
-  'DSH-ASSIGNEES',
   'DSH-IDEMPOTENCY-KEY',
   'DSH-CREATED',
+  'DSH-ASSIGNEES',
 ] as const
 export type HeaderKey = (typeof HEADER_ORDER)[number]
 
 const HEADER_LINE = /^<!--\s*DSH-[A-Z-]+:.*-->[ \t]*\r?$/
-const TRAILER = /^(?:\*\*Blocked by:\*\*|\*\*Status:\*\*|Blocked by:|Status:|## Comments[ \t]*\r?$)/m
 const NONE_BLOCKING = 'None (can start immediately)'
-export const PROGRESS_HEADING = /^## Progress\b[^\n]*$/m
+/** DSH writes `## 进度`; `## Progress` is read as the same section. */
+export const PROGRESS_HEADING = /^## (?:进度|Progress)(?![A-Za-z])[^\n]*$/m
+const COMMENTS_HEADING = /^## Comments[ \t]*\r?$/m
 export const ORIGINAL_WORDS_TITLE = "Maintainer's original words"
 const ORIGINAL_WORDS_HEADING = new RegExp(`^## ${ORIGINAL_WORDS_TITLE}[ \\t]*\\r?$`, 'm')
 const BODY_LIMIT = 60 * 1024
@@ -84,8 +85,8 @@ const listOf = (value: string | undefined): string[] =>
     .map(entry => entry.trim())
     .filter(Boolean)
 
-/** The head of a file (hidden headers and the `# ` title line), its body, and the trailer (`Blocked by`, `Status`, `## Comments`). */
-export const splitRegions = (text: string): { head: string; body: string; tail: string } => {
+/** The hidden headers and the `# ` title line at the top of a file, with their final newline. */
+const headOf = (text: string): string => {
   const lines = text.split('\n')
   let end = 0
   let title: number | null = null
@@ -99,15 +100,10 @@ export const splitRegions = (text: string): { head: string; body: string; tail: 
     }
   }
   if (title !== null) end = title + 1
-  const head = end === 0 ? '' : `${lines.slice(0, end).join('\n')}\n`
-  const rest = lines.slice(end).join('\n')
-  const trailer = TRAILER.exec(rest)
-  const body = (trailer ? rest.slice(0, trailer.index) : rest).trim()
-  return { head, body, tail: trailer ? rest.slice(trailer.index) : '' }
+  return end === 0 ? '' : `${lines.slice(0, end).join('\n')}\n`
 }
 
-export const joinRegions = ({ head, body, tail }: { head: string; body: string; tail: string }): string =>
-  `${head}${body === '' ? '' : `\n${body}\n`}${tail === '' ? '' : `\n${tail}`}`
+const headEnd = (text: string): number => headOf(text).length
 
 /** Sets a `**Name:** value` field line; adds it before the trailer's `## Comments` when the file has none and `add` is set. */
 export const setField = (text: string, name: string, value: string, add = true): string => {
@@ -117,7 +113,7 @@ export const setField = (text: string, name: string, value: string, add = true):
   const status = name === 'Blocked by' ? /^\**Status:\**/m.exec(text) : null
   if (status) return `${text.slice(0, status.index)}**${name}:** ${value}\n\n${text.slice(status.index)}`
   const comments = /^## Comments[ \t]*\r?$/m.exec(text)
-  const field =`**${name}:** ${value}\n`
+  const field = `**${name}:** ${value}\n`
   if (comments) return `${text.slice(0, comments.index).replace(/\s+$/, '')}\n\n${field}\n${text.slice(comments.index)}`
   return `${text.replace(/\s+$/, '')}\n\n${field}`
 }
@@ -151,8 +147,8 @@ export const renderFile = (file: NewFile): string => {
   if (file.parent !== null) headers.push(headerLine('DSH-PARENT', file.parent))
   if (file.labels.length > 0) headers.push(headerLine('DSH-LABELS', file.labels.join(', ')))
   if (file.blockedBy.length > 0) headers.push(headerLine('DSH-BLOCKED-BY', blockersText(file.blockedBy)))
-  if (file.assignees.length > 0) headers.push(headerLine('DSH-ASSIGNEES', file.assignees.join(', ')))
   headers.push(headerLine('DSH-IDEMPOTENCY-KEY', file.idempotencyKey), headerLine('DSH-CREATED', file.created))
+  if (file.assignees.length > 0) headers.push(headerLine('DSH-ASSIGNEES', file.assignees.join(', ')))
 
   const body = file.body.trim()
   if (container) return `${headers.join('\n')}\n${body === '' ? '' : `\n${body}\n`}`
@@ -168,33 +164,47 @@ export const renderFile = (file: NewFile): string => {
   ].join('\n')
 }
 
-/** A section of a body: from its `## ` heading to the next one. */
-const sectionIn = (body: string, heading: RegExp): { start: number; end: number; text: string } | null => {
-  const found = heading.exec(body)
+/** A section: from its `## ` heading to the next `## ` heading (or the end). */
+const sectionIn = (text: string, heading: RegExp): { start: number; end: number; text: string } | null => {
+  const found = heading.exec(text)
   if (!found) return null
   const after = found.index + found[0].length
-  const next = /^## /m.exec(body.slice(after + 1))
-  const end = next ? after + 1 + next.index : body.length
-  return { start: found.index, end, text: body.slice(found.index, end).trim() }
+  const next = /^## /m.exec(text.slice(after + 1))
+  const end = next ? after + 1 + next.index : text.length
+  return { start: found.index, end, text: text.slice(found.index, end).trim() }
 }
 
-const without = (body: string, section: { start: number; end: number } | null): string =>
-  section === null ? body : `${body.slice(0, section.start)}${body.slice(section.end)}`.trim()
+const without = (text: string, section: { start: number; end: number } | null): string =>
+  section === null ? text : `${text.slice(0, section.start)}${text.slice(section.end)}`.trim()
 
-/** The `## Progress` section's entries, newest first. */
+/** Where the body ends: at `## Comments` or the Progress section, else the end of the file. */
+const bodyEnd = (text: string): number => {
+  const ends = [COMMENTS_HEADING.exec(text)?.index, PROGRESS_HEADING.exec(text)?.index].filter((at): at is number => at !== undefined)
+  return ends.length === 0 ? text.length : Math.min(...ends)
+}
+
+/** A file's body: what lies between its head and its Comments or Progress section, field lines included. */
+export const bodyOf = (text: string): string => text.slice(headEnd(text), bodyEnd(text)).trim()
+
+/** DSH's time in a Progress entry: `2026-10-28T19:27:07+00:00`. */
+const progressTime = (iso: string): string => iso.replace(/\.\d+Z$/, 'Z').replace(/Z$/, '+00:00')
+
+/** The Progress section's entries, newest first. */
 const progressEntries = (section: string | undefined): string[] =>
   (section ?? '')
     .split('\n')
     .slice(1)
     .filter(line => /^- /.test(line))
 
-/** Writes a Progress entry on top of the section, creating it when the body has none. */
-const withProgress = (body: string, percent: number, note: string | undefined, when: string): string => {
-  const section = sectionIn(body, PROGRESS_HEADING)
-  const entry = `- ${percent}% · ${when}${note === undefined || note.trim() === '' ? '' : ` · ${note.trim().replace(/\s*\n\s*/g, ' ')}`}`
-  const text = `## Progress: ${percent}%\n\n${[entry, ...progressEntries(section?.text)].join('\n')}`
-  if (section === null) return `${body}${body === '' ? '' : '\n\n'}${text}`
-  return `${body.slice(0, section.start)}${text}\n\n${body.slice(section.end)}`.trim()
+/** Writes a Progress entry on top of DSH's `## 进度` section, creating it at the end of the file when there is none. */
+const withProgress = (text: string, percent: number, note: string | undefined, when: string): string => {
+  const section = sectionIn(text, PROGRESS_HEADING)
+  const flat = note === undefined ? '' : note.trim().replace(/\s*\n\s*/g, ' ')
+  const entry = `- 进度：${percent}%（${progressTime(when)}）${flat === '' ? '' : `：${flat}`}`
+  const block = `## 进度\n\n${[entry, ...progressEntries(section?.text)].join('\n')}\n`
+  if (section === null) return `${text.replace(/\s+$/, '')}\n\n${block}`
+  const rest = text.slice(section.end)
+  return `${text.slice(0, section.start)}${block}${rest === '' ? '' : `\n${rest}`}`
 }
 
 /** One entry of the maintainer's original words: the quoted text, then its source. */
@@ -222,19 +232,35 @@ const withOriginalWords = (body: string, text: string, source: string | undefine
 export const bodyWithWords = (body: string, words: { text: string; source?: string } | undefined): string =>
   words === undefined ? body.trim() : withOriginalWords(body.trim(), words.text, words.source)
 
-/** A new body that keeps the Progress and original-words sections the old one had: those only grow. */
-const rewriteBody = (oldBody: string, newBody: string): string => {
-  const progress = sectionIn(oldBody, PROGRESS_HEADING)
-  const words = sectionIn(oldBody, ORIGINAL_WORDS_HEADING)
-  let next = newBody.trim()
-  for (const [kept, heading] of [
-    [progress, PROGRESS_HEADING],
-    [words, ORIGINAL_WORDS_HEADING],
-  ] as const) {
-    if (kept !== null) next = without(next, sectionIn(next, heading))
-  }
-  for (const kept of [progress, words]) if (kept !== null) next = `${next}${next === '' ? '' : '\n\n'}${kept.text}`
-  return next
+const FIELD_LINE = /^\*\*(?:Blocked by|Status):\*\*/
+
+/** Replaces the body, keeping the field lines and the original words (which only grow). Comments and Progress lie past the body. */
+const withBody = (text: string, newBody: string): string => {
+  const start = headEnd(text)
+  const end = bodyEnd(text)
+  const region = text.slice(start, end)
+  const fields = region.split('\n').filter(line => FIELD_LINE.test(line))
+  const words = sectionIn(region, ORIGINAL_WORDS_HEADING)
+  let body = newBody.trim()
+  if (words !== null) body = `${without(body, sectionIn(body, ORIGINAL_WORDS_HEADING))}${body === '' ? '' : '\n\n'}${words.text}`.trim()
+  const rest = text.slice(end)
+  return [
+    text.slice(0, start),
+    body === '' ? '' : `\n${body}\n`,
+    fields.length === 0 ? '' : `\n${fields.join('\n\n')}\n`,
+    rest === '' ? '' : `\n${rest}`,
+  ].join('')
+}
+
+/** Adds original words inside the body: before the field lines, Comments and Progress. */
+const withWordsInFile = (text: string, words: { text: string; source?: string }): string => {
+  const start = headEnd(text)
+  const region = text.slice(start, bodyEnd(text))
+  const trailer = /^\*\*(?:Blocked by|Status):\*\*/m.exec(region)
+  const cut = trailer ? trailer.index : region.length
+  const body = withOriginalWords(region.slice(0, cut).trim(), words.text, words.source)
+  const after = `${region.slice(cut)}${text.slice(start + region.length)}`
+  return `${text.slice(0, start)}\n${body}\n${after === '' ? '' : `\n${after}`}`
 }
 
 /** What a patch changes in a file's text. */
@@ -256,6 +282,19 @@ const statusFor = (labels: string[]): string | undefined => labels.find(label =>
 /** The labels a file carries in its `DSH-LABELS` header or its `Labels:` field. */
 export const labelsIn = (text: string): string[] =>
   listOf(readHeader(text, 'DSH-LABELS') ?? /^\**Labels:\**[ \t]*(.*)$/m.exec(text)?.[1])
+
+/** Appends a comment at the end of `## Comments`, which DSH keeps ahead of the Progress section. */
+const withComment = (text: string, entry: string): string => {
+  const comments = sectionIn(text, COMMENTS_HEADING)
+  if (comments !== null) {
+    const rest = text.slice(comments.end)
+    return `${text.slice(0, comments.end).replace(/\s+$/, '')}\n\n${entry}${rest === '' ? '' : `\n${rest}`}`
+  }
+  const progress = PROGRESS_HEADING.exec(text)
+  const block = `## Comments\n\n${entry}`
+  if (progress) return `${text.slice(0, progress.index).replace(/\s+$/, '')}\n\n${block}\n${text.slice(progress.index)}`
+  return `${text.replace(/\s+$/, '')}\n\n${block}`
+}
 
 /** The text with `patch` applied; `container` files keep their title in `DSH-TITLE`. */
 export const applyPatch = (text: string, patch: Patch, container: boolean): string => {
@@ -287,13 +326,8 @@ export const applyPatch = (text: string, patch: Patch, container: boolean): stri
     next = setHeader(next, 'DSH-ASSIGNEES', patch.assignees.length === 0 ? null : patch.assignees.join(', '))
   }
 
-  if (patch.body !== undefined || patch.progress !== undefined || patch.originalWords !== undefined) {
-    const regions = splitRegions(next)
-    let body = patch.body === undefined ? regions.body : rewriteBody(regions.body, patch.body)
-    if (patch.originalWords !== undefined) body = withOriginalWords(body, patch.originalWords.text, patch.originalWords.source)
-    if (patch.progress !== undefined) body = withProgress(body, patch.progress.percent, patch.progress.note, patch.progress.when)
-    next = joinRegions({ ...regions, body })
-  }
+  if (patch.body !== undefined) next = withBody(next, patch.body)
+  if (patch.originalWords !== undefined) next = withWordsInFile(next, patch.originalWords)
 
   if (patch.close !== undefined) {
     const status = patch.close === 'duplicate' ? 'closed' : 'resolved'
@@ -304,13 +338,8 @@ export const applyPatch = (text: string, patch: Patch, container: boolean): stri
     }
   }
 
-  if (patch.comment !== undefined) {
-    const entry = `### local, ${patch.comment.when}\n${patch.comment.text.trim()}\n`
-    const comments = /^## Comments[ \t]*\r?$/m.exec(next)
-    next = comments
-      ? `${next.replace(/\s+$/, '')}\n\n${entry}`
-      : `${next.replace(/\s+$/, '')}\n\n## Comments\n\n${entry}`
-  }
+  if (patch.comment !== undefined) next = withComment(next, `### local, ${patch.comment.when}\n${patch.comment.text.trim()}\n`)
+  if (patch.progress !== undefined) next = withProgress(next, patch.progress.percent, patch.progress.note, patch.progress.when)
   return next
 }
 

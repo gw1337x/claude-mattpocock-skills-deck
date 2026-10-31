@@ -61,7 +61,7 @@ import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyO
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
-import { claim, newTitle, OPENER_BACKGROUND, SESSION_SERVER, START_SESSION, stillOpen, type Opened } from './session-opener'
+import { claim, newTitle, OPENER_BACKGROUND, SESSION_SERVER, START_SESSION, stillOpen } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
@@ -143,6 +143,11 @@ const openedKey = async ($: Engine) => `opened:${await repoKey($)}`
  * the prompt goes in the box and on the clipboard, with a toast saying so.
  */
 const openSession = async ($: Engine, text: string, name: string, surface: RenderSurface, fallbackTitle?: string | null) => {
+  // Noted before the call, so the new session's first message finds its record whenever it arrives.
+  const now = await $.clock.now()
+  const key = await openedKey($)
+  const before = stillOpen(await $.store.get(key), now)
+  await $.store.set(key, [...before, { head: headOf(text), at: now }])
   try {
     const result = await $.mcp.call(SESSION_SERVER, START_SESSION, {
       initiation: 'user_asked',
@@ -154,14 +159,11 @@ const openSession = async ($: Engine, text: string, name: string, surface: Rende
     if (result.isError) throw new Error('the session server refused')
   } catch (error) {
     debugNote(`Could not open a new session: ${error instanceof Error ? error.message : String(error)}`)
+    await $.store.set(key, before)
     await fillPrompt($, text, fallbackTitle)
     await $.ui.copy({ text, surface })
     $.ui.toast('Could not open a new session here: the prompt is in the box and copied.')
-    return
   }
-  const now = await $.clock.now()
-  const key = await openedKey($)
-  await $.store.set(key, [...stillOpen(await $.store.get(key), now), { head: headOf(text), at: now }])
 }
 
 /** Marks this session as one the deck opened when its first message is the prompt the deck sent. */

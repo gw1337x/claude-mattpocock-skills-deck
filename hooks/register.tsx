@@ -156,13 +156,17 @@ const openSession = async ($: Engine, text: string, name: string, surface: Rende
       background: OPENER_BACKGROUND,
       context: 'fresh',
     })
-    if (result.isError) throw new Error('the session server refused')
+    if (result.isError) {
+      const said = result.content.map(block => ('text' in block ? String(block.text) : '')).join(' ').trim()
+      throw new Error(said === '' ? 'the session server refused' : said)
+    }
   } catch (error) {
-    debugNote(`Could not open a new session: ${error instanceof Error ? error.message : String(error)}`)
+    const why = error instanceof Error ? error.message : String(error)
+    debugNote(`Could not open a new session: ${why}`)
     await $.store.set(key, before)
     await fillPrompt($, text, fallbackTitle)
     await $.ui.copy({ text, surface })
-    $.ui.toast('Could not open a new session here: the prompt is in the box and copied.')
+    $.ui.toast(`Could not open a new session here (${why.slice(0, 160)}): the prompt is in the box and copied.`)
   }
 }
 

@@ -53,6 +53,7 @@ import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
+import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, DeckRefusal, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
@@ -249,7 +250,10 @@ const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
           },
           reload: () => readDeck($, backend),
         }
-      : {}),
+      : {
+          gh: { run: ghRun($), now: () => new Date(readAt).toISOString() },
+          reload: () => readDeck($, backend),
+        }),
     detail: async item => {
       try {
         if (backend === 'github') return await readGithubDetail(ghRun($), item.number ?? 0)
@@ -271,7 +275,7 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
     return deckContext(await workspaceRoot($), found, items)
   }
   if (found === null) throw new DeckRefusal(NO_BACKEND)
-  const write = DECK_WRITES[name]
+  const write = (found.backend === 'github' ? GITHUB_WRITES : DECK_WRITES)[name]
   if (write !== undefined) return write(await readDeck($, found.backend), input)
   const read = DECK_READS[name]
   if (read === undefined) throw new DeckRefusal(`Unknown deck tool ${name}.`)

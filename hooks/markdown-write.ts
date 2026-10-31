@@ -300,7 +300,7 @@ const appendSectionBlock = (text: string, title: string, block: string): string 
 const keepEol = (original: string, result: string): string => (original.endsWith('\n') && !result.endsWith('\n') ? `${result}\n` : result)
 
 /** Writes a Progress entry on top of `## 进度`, keeping the entries below it; adds the section before Comments or at the end. */
-const withProgress = (text: string, percent: number, note: string | undefined, when: string): string => {
+export const withProgress = (text: string, percent: number, note: string | undefined, when: string): string => {
   const flat = note === undefined ? '' : note.trim().replace(/\s*\n\s*/g, ' ')
   const entry = `- 进度：${percent}%（${progressTime(when)}）${flat === '' ? '' : `：${flat}`}`
   const lines = text.split('\n')
@@ -337,7 +337,7 @@ const wordsIn = (lines: string[], marks: Mark[], section: Section): { source: st
 }
 
 /** Adds the maintainer's original words: after `## 目的` when there is one, else under the title; an entry already there is skipped. */
-const withOriginalWords = (text: string, words: { text: string; source?: string }): string => {
+export const withOriginalWords = (text: string, words: { text: string; source?: string }): string => {
   const source = (words.source ?? '').trim()
   const quote = words.text.replace(/\r\n?/g, '\n')
   const lines = text.split('\n')
@@ -382,7 +382,7 @@ export const bodyOf = (text: string): string => {
 }
 
 /** Replaces the body, keeping the field lines and the original words (which only grow). Comments and Progress lie past the body. */
-const withBody = (text: string, newBody: string): string => {
+export const withBody = (text: string, newBody: string): string => {
   const { start, end } = bodyBounds(text)
   const region = text.slice(start, end)
   const fields = region.split('\n').filter(line => /^\*\*(?:Blocked by|Status):\*\*|^(?:Type|Status|Blocked by):/.test(line))

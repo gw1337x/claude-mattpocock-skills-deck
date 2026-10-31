@@ -2,6 +2,7 @@ import type { Backend, BoardItem } from '../types'
 import { BACKEND_NAMES } from './backend'
 import { statusOf } from './board-ui'
 import { progressOf } from './actions'
+import type { Run } from './github-tracker'
 import { padNumber as pad } from './markdown-write'
 import { derive, isContainer, progressText, type Derived } from './derive'
 
@@ -29,6 +30,8 @@ export type DeckTracker = {
   detail: (item: BoardItem) => Promise<{ body: string; comments: string[] }>
   /** Markdown only: where the write tools put files. GitHub has none, so its writes are refused. */
   files?: DeckFiles
+  /** GitHub only: how the write tools reach `gh`, and the clock they stamp Progress with (an ISO time). */
+  gh?: { run: Run; now: () => string }
   /** Reads the tracker again, to read a write back. */
   reload?: () => Promise<DeckTracker>
 }

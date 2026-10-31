@@ -62,6 +62,11 @@ export type GhServer = {
   calls: string[]
   /** Comments on issues, by number, in the order posted (seeded ones first). */
   comments: Record<number, string[]>
+  /** The issues as writes have left them (a copy of GITHUB_ISSUES to start with). */
+  issues: Issue[]
+  /** Native sub-issues and blocked-by dependencies as writes have left them, by issue number. */
+  subIssues: Record<number, number[]>
+  blockedBy: Record<number, number[]>
 }
 
 /** Answers `$.process.run` the way `gh` would for the GitHub fixture. */
@@ -81,7 +86,16 @@ export const serveGh = (
     colors?: Record<string, string>
   } = {},
 ): GhServer => {
-  const server: GhServer = { calls: [], comments: { ...options.comments } }
+  const server: GhServer = {
+    calls: [],
+    comments: { ...options.comments },
+    issues: GITHUB_ISSUES.map(each => ({ ...each, labels: [...each.labels], assignees: [...each.assignees] })),
+    subIssues: Object.fromEntries(Object.entries(SUB_ISSUES).map(([key, value]) => [key, [...value]])),
+    blockedBy: Object.fromEntries(Object.entries(BLOCKED_BY).map(([key, value]) => [key, [...value]])),
+  }
+  const find = (number: number) => server.issues.find(each => each.number === number)
+  const flags = (rest: string[], flag: string) => rest.flatMap((arg, i) => (arg === flag ? [rest[i + 1] ?? ''] : []))
+  const byId = (id: number) => id - 1000
   const colors = { ...options.colors }
   const reply = (stdout: string, exitCode = 0, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
@@ -117,16 +131,67 @@ export const serveGh = (
       return reply(JSON.stringify(names.map(name => ({ name }))))
     }
     if (line.startsWith('pr list')) return reply(JSON.stringify(GITHUB_PRS))
-    if (line.startsWith('issue list')) return reply(JSON.stringify(GITHUB_ISSUES))
+    if (line.startsWith('issue list') && argv.includes('--search')) {
+      const needle = (argv[argv.indexOf('--search') + 1] ?? '').replace(/ in:body$/, '')
+      return reply(JSON.stringify(server.issues.filter(each => each.body.includes(needle)).map(({ number, body }) => ({ number, body }))))
+    }
+    if (line.startsWith('issue list')) return reply(JSON.stringify(server.issues))
+    const one = /^api repos\/\{owner\}\/\{repo\}\/issues\/(\d+)$/.exec(line)
+    if (one) return reply(JSON.stringify({ id: 1000 + Number(one[1]) }))
+    const write = /^api --method (POST|DELETE) repos\/\{owner\}\/\{repo\}\/issues\/(\d+)\/(sub_issues|sub_issue|dependencies\/blocked_by(?:\/(\d+))?)/.exec(line)
+    if (write) {
+      const [, verb, target, route, path] = write
+      const table = route!.startsWith('sub_issue') ? server.subIssues : server.blockedBy
+      const list = (table[Number(target)] ??= [])
+      const other = byId(Number(path ?? /=(\d+)$/.exec(line)?.[1]))
+      if (verb === 'POST') list.push(other)
+      else table[Number(target)] = list.filter(number => number !== other)
+      return reply('{}')
+    }
+    if (argv[1] === 'issue' && argv[2] === 'create') {
+      const number = Math.max(...server.issues.map(each => each.number)) + 1
+      server.issues.push(
+        issue(number, argv[argv.indexOf('--title') + 1] ?? '', {
+          body: argv[argv.indexOf('--body') + 1] ?? '',
+          labels: labels(...flags(argv, '--label')),
+          assignees: flags(argv, '--assignee').map(login => ({ login })),
+        }),
+      )
+      return reply(`https://github.com/acme/shop/issues/${number}
+`)
+    }
+    if (argv[1] === 'issue' && argv[2] === 'edit') {
+      const target = find(Number(argv[3]))
+      if (target === undefined) return reply('', 1, 'issue not found')
+      const title = flags(argv, '--title')[0]
+      const body = flags(argv, '--body')[0]
+      if (title !== undefined) target.title = title
+      if (body !== undefined) target.body = body
+      for (const name of flags(argv, '--add-label')) if (!target.labels.some(each => each.name === name)) target.labels.push({ name })
+      const drop = flags(argv, '--remove-label')
+      target.labels = target.labels.filter(each => !drop.includes(each.name))
+      for (const login of flags(argv, '--add-assignee')) target.assignees.push({ login })
+      const out = flags(argv, '--remove-assignee')
+      target.assignees = target.assignees.filter(each => !out.includes(each.login))
+      return reply('')
+    }
+    if (argv[1] === 'issue' && argv[2] === 'close') {
+      const target = find(Number(argv[3]))
+      if (target === undefined) return reply('', 1, 'issue not found')
+      target.state = 'CLOSED'
+      const why = flags(argv, '--comment')[0]
+      if (why !== undefined) (server.comments[target.number] ??= []).push(why)
+      return reply('')
+    }
     const api = /^api repos\/\{owner\}\/\{repo\}\/issues\/(\d+)\/(sub_issues|dependencies\/blocked_by)$/.exec(line)
     if (api) {
-      const table = api[2] === 'sub_issues' ? SUB_ISSUES : BLOCKED_BY
+      const table = api[2] === 'sub_issues' ? server.subIssues : server.blockedBy
       return reply(JSON.stringify((table[Number(api[1])] ?? []).map(number => ({ number }))))
     }
     const view = /^issue view (\d+) --json body,comments$/.exec(line)
     if (view) {
       const number = Number(view[1])
-      const found = GITHUB_ISSUES.find(i => i.number === number)
+      const found = find(number)
       return reply(
         JSON.stringify({ body: found?.body ?? '', comments: (server.comments[number] ?? []).map(body => ({ body })) }),
       )

@@ -33,9 +33,9 @@ import {
   type Patch,
 } from './markdown-write'
 
-const MAP_LABELS = ['wayfinder:research', 'wayfinder:prototype', 'wayfinder:grilling', 'wayfinder:task']
-const CREATE_KINDS = ['map', 'map-ticket', 'spec', 'spec-ticket', 'bug', 'issue'] as const
-type CreateKind = (typeof CREATE_KINDS)[number]
+export const MAP_LABELS = ['wayfinder:research', 'wayfinder:prototype', 'wayfinder:grilling', 'wayfinder:task']
+export const CREATE_KINDS = ['map', 'map-ticket', 'spec', 'spec-ticket', 'bug', 'issue'] as const
+export type CreateKind = (typeof CREATE_KINDS)[number]
 const PLAN_KINDS = ['map-ticket', 'bug', 'issue'] as const
 const PLAN_CHILD_LIMIT = 60
 
@@ -185,25 +185,25 @@ export const DECK_WRITE_TOOLS: DeckToolSpec[] = [
 
 const filesOf = (tracker: DeckTracker): DeckFiles => {
   if (tracker.files === undefined || tracker.reload === undefined) {
-    throw new DeckRefusal('Writing tickets on GitHub is not available yet. Use gh for now, or switch this workspace to Markdown.')
+    throw new DeckRefusal('This Backend has no files to write tickets into.')
   }
   return tracker.files
 }
 
 const reloaded = (tracker: DeckTracker): Promise<DeckTracker> => tracker.reload!()
 
-const requiredTitle = (value: unknown): string => {
+export const requiredTitle = (value: unknown): string => {
   const title = stringIn(value)
   if (title === undefined) throw new DeckRefusal('Pass a title.')
   return title
 }
 
-const refuseOversize = (body: string) => {
+export const refuseOversize = (body: string) => {
   if (overLimit(body)) throw new DeckRefusal('The body is over 60KB. Shorten it, or move the detail into a linked file.')
 }
 
 /** Labels in the order given, then those the kind requires; a label already there is not added twice. */
-const withLabels = (given: string[], required: string[]): string[] => {
+export const withLabels = (given: string[], required: string[]): string[] => {
   const labels = [...given]
   for (const label of required) if (!labels.some(have => have.toLowerCase() === label.toLowerCase())) labels.push(label)
   return labels
@@ -263,7 +263,7 @@ const refuseCycle = (tracker: DeckTracker, feature: string, proposed: Map<number
 }
 
 /** The Map or Spec a ticket of this kind hangs under: parentKey, else the effort named, else the only one there is. */
-const parentOfKind = (tracker: DeckTracker, input: Record<string, unknown>, kind: 'map' | 'spec'): BoardItem => {
+export const parentOfKind = (tracker: DeckTracker, input: Record<string, unknown>, kind: 'map' | 'spec'): BoardItem => {
   const scope = scopeOf(input)
   const raw = input.parentKey
   const want = kind === 'map' ? 'Map' : 'Spec'
@@ -302,7 +302,7 @@ const reread = async (tracker: DeckTracker, path: string, extra: Record<string, 
   return { ...extra, ...(await deckIssueGet(fresh, { key: path })) }
 }
 
-const wordsOf = (value: unknown): { text: string; source?: string } | undefined => {
+export const wordsOf = (value: unknown): { text: string; source?: string } | undefined => {
   const words = value as { text?: unknown; source?: unknown } | undefined
   if (words === undefined) return undefined
   if (typeof words.text !== 'string' || words.text.trim() === '') throw new DeckRefusal('originalWords.text is empty.')
@@ -397,7 +397,7 @@ export const deckIssueCreate = async (tracker: DeckTracker, input: Record<string
 }
 
 /** The open implementation tickets of a Spec, as keys. */
-const openChildren = (tracker: DeckTracker, container: BoardItem): string[] =>
+export const openChildren = (tracker: DeckTracker, container: BoardItem): string[] =>
   tracker.items.filter(item => item.parent === container.path && item.state === 'open').map(item => keyOf(tracker.backend, item))
 
 export const deckIssuePatch = async (tracker: DeckTracker, input: Record<string, unknown>) => {
@@ -513,10 +513,10 @@ export const deckMapLink = async (tracker: DeckTracker, input: Record<string, un
   return items.length === 1 ? items[0] : { items }
 }
 
-type PlanChild = { key: string; title: string; body: string; kind: (typeof PLAN_KINDS)[number]; label?: string; labels: string[]; assignees: string[] }
+export type PlanChild = { key: string; title: string; body: string; kind: (typeof PLAN_KINDS)[number]; label?: string; labels: string[]; assignees: string[] }
 
-export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<string, unknown>) => {
-  const files = filesOf(tracker)
+/** A plan's title, bodies, children and wait-on edges, checked; the same rules on every Backend. */
+export const parsePlan = (input: Record<string, unknown>) => {
   const title = requiredTitle(input.title)
   const mapBody = typeof input.body === 'string' ? input.body.trim() : ''
   refuseOversize(mapBody)
@@ -562,6 +562,12 @@ export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<stri
   }
 
   const planId = stringIn(input.planId) ?? `plan-${hashOf(`${title}\n${children.map(child => `${child.key}:${child.title}`).join('\n')}`)}`
+  return { title, mapBody, children, blockers, planId }
+}
+
+export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<string, unknown>) => {
+  const files = filesOf(tracker)
+  const { title, mapBody, children, blockers, planId } = parsePlan(input)
   // A retry finds its own folder again: the first with this plan's Map in it, else the first free name.
   let feature = scopeOf(input)
   for (let n = 1; feature === null && n <= 50; n++) {

@@ -595,7 +595,7 @@ test('a ticket the tools wrote shows on the List after the next refresh', async 
   await ui.unmount()
 })
 
-test('the write tools are registered in the prompt, and GitHub refuses them for now', async ($, on) => {
+test('the write tools are registered in the prompt', async ($, on) => {
   const registered: { name: string; isDeferred?: boolean }[] = []
   serveFiles(on, { 'docs/agents/issue-tracker.md': '# Issue tracker: GitHub\n' })
   serveGh(on)
@@ -610,7 +610,6 @@ test('the write tools are registered in the prompt, and GitHub refuses them for 
   for (const name of ['deck_issue_create', 'deck_issue_patch', 'deck_map_link', 'deck_map_plan_create']) {
     expect(registered).toContainEqual(expect.objectContaining({ name, isDeferred: false }))
   }
-  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'issue' })).error).toMatch(/GitHub is not available yet/)
 })
 
 test('a workspace with no Backend refuses the write tools like the read ones', async ($, on) => {

@@ -338,7 +338,7 @@ export const applyPatch = (text: string, patch: Patch, container: boolean): stri
     }
   }
 
-  if (patch.comment !== undefined) next = withComment(next, `### local, ${patch.comment.when}\n${patch.comment.text.trim()}\n`)
+  if (patch.comment !== undefined) next = withComment(next, `### local — ${patch.comment.when}\n${patch.comment.text.trim()}\n`)
   if (patch.progress !== undefined) next = withProgress(next, patch.progress.percent, patch.progress.note, patch.progress.when)
   return next
 }

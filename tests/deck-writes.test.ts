@@ -244,7 +244,7 @@ test('deck_issue_patch comments, labels, assigns, retitles and rewrites the body
       '',
       '## Comments',
       '',
-      `### local, ${ISO}`,
+      `### local — ${ISO}`,
       'Looking at it.',
       '',
     ].join('\n'),
@@ -581,7 +581,7 @@ test('a ticket DSH wrote keeps its layout: a comment lands in Comments, a Progre
   await call($, 'deck_issue_patch', { key: 'netrunner/04', comment: 'Checked again.', progress: { percent: 100, note: 'Verified' } })
 
   expect(files[path]).toBe(
-    DSH_TICKET.replace('\n## 进度', `\n### local, ${ISO}\nChecked again.\n\n## 进度`).replace(
+    DSH_TICKET.replace('\n## 进度', `\n### local — ${ISO}\nChecked again.\n\n## 进度`).replace(
       '- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome',
       `- 进度：100%（${PROGRESS_TIME}）：Verified\n- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome`,
     ),

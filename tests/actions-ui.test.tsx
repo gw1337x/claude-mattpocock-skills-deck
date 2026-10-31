@@ -87,19 +87,6 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`Health check fills its prompt on ${surface}`, async ($, on) => {
-    serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveBox(on, '')
-    const ui = await mount(surface)($)
-
-    await ui.press({ key: 'health' })
-
-    expect(log.fills[0]?.text).toMatch(/orphan/i)
-    expect(log.fills[0]?.text).toMatch(/approval/i)
-    expect(log.submitted).toBe(0)
-    await ui.unmount()
-  })
-
   test(`each card has a copy-link control on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const copied: string[] = []

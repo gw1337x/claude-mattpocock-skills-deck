@@ -127,13 +127,18 @@ export const parseItem = (path: string, text: string): BoardItem => {
   const status = (fields.get('status') || headerStatus).toLowerCase()
   // DSH cannot reopen, so either place saying closed settles it.
   const closed = CLOSED_STATUSES.has(status) || CLOSED_STATUSES.has(headerStatus)
-  const labels = [
-    ...new Set([
-      ...splitList(fields.get('labels')),
-      ...splitList(fields.get('dsh-labels')),
-      ...(status !== '' && !STATUSES_SHOWN_AS_STATE.has(status) ? [status] : []),
-    ]),
-  ]
+  // DSH reads md-v1 labels from a `Labels:` line, else the `DSH-LABELS` header, and never from the Status word.
+  // Plain files have no other label source, so they keep the Status word.
+  const labels =
+    fields.get('dsh-format') === 'md-v1'
+      ? splitList(fields.has('labels') ? fields.get('labels') : fields.get('dsh-labels'))
+      : [
+          ...new Set([
+            ...splitList(fields.get('labels')),
+            ...splitList(fields.get('dsh-labels')),
+            ...(status !== '' && !STATUSES_SHOWN_AS_STATE.has(status) ? [status] : []),
+          ]),
+        ]
   const assignees = splitList(fields.get('dsh-assignees'))
   const blockers = fields.get('dsh-blocked-by') ?? fields.get('blocked by') ?? ''
 
@@ -154,6 +159,18 @@ export const parseItem = (path: string, text: string): BoardItem => {
   }
 }
 
+/**
+ * Whether the `DSH-PARENT` (or legacy `parentKey`) header, read from the lines before the first heading as DSH does,
+ * says there is no parent: empty, `null`, `none` or `-`.
+ */
+const declaresNoParent = (text: string): boolean => {
+  const heading = /^#+\s+/m.exec(text)
+  const head = heading ? text.slice(0, heading.index) : text.split('\n').slice(0, 10).join('\n')
+  const match = /^[ \t]*<!--[ \t]*(?:parentKey|DSH-PARENT)[ \t]*:[ \t]*(.*?)-->/im.exec(head)
+  const value = match?.[1]?.trim()
+  return value !== undefined && (value === '' || value === '-' || /^(?:null|none)$/i.test(value))
+}
+
 /** A file or folder that could not be read is kept as a plain Ticket with a warning. */
 const unreadableItem = (path: string, feature: string): BoardItem => ({
   ...parseItem(path, ''),
@@ -169,7 +186,9 @@ const readItem = async (
   parent: string | null,
 ): Promise<BoardItem> => {
   try {
-    return { ...parseItem(path, await fs.read(path)), updated, parent }
+    const text = await fs.read(path)
+    // `00` is the folder's Map or Spec; any other key, or no header, keeps the folder as the parent.
+    return { ...parseItem(path, text), updated, parent: declaresNoParent(text) ? null : parent }
   } catch {
     return { ...unreadableItem(path, path.split('/')[1] ?? ''), updated, parent }
   }

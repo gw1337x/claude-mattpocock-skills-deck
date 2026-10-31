@@ -810,16 +810,20 @@ const entryFor = (backend: Backend, item: BoardItem, action: string, source: Rou
   hasWork: true,
 })
 
-/** The Work Route table's columns and their widths in cells, shared by the header and every row so they line up. */
+/**
+ * The Work Route table's columns and their widths, shared by the header and every row so they line up. Percentages of the
+ * row, summing under 100 to leave room for the gaps: cells in a fixed count would overflow a narrow Pane, and the desktop
+ * then shrinks each row's cells by a different amount.
+ */
 const ROUTE_COLUMNS = [
-  ['Session', 14],
-  ['Ticket', 8],
-  ['Title', 36],
-  ['Action', 14],
-  ['State', 10],
-  ['When', 16],
+  ['Session', '13%'],
+  ['Ticket', '7%'],
+  ['Title', '36%'],
+  ['Action', '13%'],
+  ['State', '9%'],
+  ['When', '12%'],
 ] as const
-const ROUTE_WIDTHS = Object.fromEntries(ROUTE_COLUMNS) as Record<(typeof ROUTE_COLUMNS)[number][0], number>
+const ROUTE_WIDTHS = Object.fromEntries(ROUTE_COLUMNS) as Record<(typeof ROUTE_COLUMNS)[number][0], string>
 
 /**
  * Applies one session's change to the cross-session route without losing what other sessions wrote meanwhile. A store
@@ -1333,9 +1337,9 @@ export const register: Register = on => {
             </Box>
             {rows.length === 0 && <Text dimColor>No Tickets touched in this repo yet.</Text>}
             {rows.length > 0 && (
-              <Box flexDirection="row" columnGap="md">
+              <Box flexDirection="row" columnGap="xs">
                 {ROUTE_COLUMNS.map(([column, width]) => (
-                  <Box key={`route-head:${column}`} width={width}>
+                  <Box key={`route-head:${column}`} width={width} flexShrink={0}>
                     <Text dimColor size="footnote" weight="semibold">
                       {column}
                     </Text>
@@ -1350,7 +1354,7 @@ export const register: Register = on => {
               const mark = entry.source === 'reported' ? '' : ' · auto'
               const who = owner === session ? 'this session' : label
               const cell = (column: (typeof ROUTE_COLUMNS)[number][0], content: RenderChildren) => (
-                <Box key={`route:${index}:${column}`} width={ROUTE_WIDTHS[column]} alignItems="flex-start">
+                <Box key={`route:${index}:${column}`} width={ROUTE_WIDTHS[column]} flexShrink={0} alignItems="flex-start">
                   {content}
                 </Box>
               )
@@ -1373,7 +1377,7 @@ export const register: Register = on => {
                   </Button>,
                 )
               return (
-                <Box key={`route-row:${index}`} flexDirection="row" columnGap="md">
+                <Box key={`route-row:${index}`} flexDirection="row" columnGap="xs">
                   {press('Session', <Text dimColor size="footnote">{who}</Text>)}
                   {press('Ticket', <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)}`}</Text>)}
                   {press('Title', <Text wrap="truncate">{entry.title}</Text>)}

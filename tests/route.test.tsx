@@ -363,7 +363,7 @@ for (const surface of SURFACES) {
     const widthOf = (key: string) => cells.find(cell => cell.key === key)?.props.width
     for (const column of COLUMNS) {
       const head = widthOf(`route-head:${column}`)
-      expect(typeof head).toBe('number')
+      expect(head).toMatch(/^\d+%$/)
       for (const row of [0, 1]) expect(widthOf(`route:${row}:${column}`)).toBe(head)
     }
     const state = cells.find(cell => cell.key === 'route:0:State')

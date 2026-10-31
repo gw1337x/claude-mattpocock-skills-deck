@@ -218,6 +218,29 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
+  test(`skills that are installed but left out of the usage list do not show the skills banner on ${surface}`, async ($, on) => {
+    const installed = Object.fromEntries(ALL.map(name => [`.claude/skills/${name}/SKILL.md`, '---\ndisable-model-invocation: true\n---\n']))
+    serveFiles(on, { ...MARKDOWN, ...installed })
+    serveBox(on, [])
+    const ui = await mountBand($, surface)
+
+    expect(guideOf(await texts(ui))).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test(`only the skills with no file and no usage entry are named as missing on ${surface}`, async ($, on) => {
+    const installed = Object.fromEntries(ALL.filter(name => name !== 'triage').map(name => [`.claude/skills/${name}/SKILL.md`, '---\n---\n']))
+    serveFiles(on, { ...MARKDOWN, ...installed })
+    serveBox(on, [])
+    const ui = await mountBand($, surface)
+
+    const banner = guideOf(await texts(ui)) ?? ''
+    expect(banner).toContain(GUIDE_TEXTS.skills)
+    expect(banner).toContain('triage')
+    expect(banner).not.toContain('wayfinder')
+    await ui.unmount()
+  })
+
   test(`a guided workspace shows no banner on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN)
     serveBox(on)

@@ -35,7 +35,7 @@ import {
   statusTag,
 } from './board-ui'
 import { allLabels, DEFAULT_VIEW, defaultDescending, derive, efforts, labelsByClicks, looseCount, progressText, visibleItems, type Derived } from './derive'
-import { buildChecks, gatherEnv, scoreOf, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
+import { buildChecks, gatherEnv, REQUIRED_SKILLS, scoreOf, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
   GH_LIST_LIMIT,
@@ -568,21 +568,50 @@ const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> => {
     await gatherEnv(backend, {
       run: ghRun($),
       exists: path => $.fs.exists(path),
-      loaded: () => loadedSkills($),
+      loaded: () => installedSkillNames($),
     }),
   )
   const skipped = await readLabelsSkipped($)
   return checks.filter(check => !(skipped && check.id === 'github-labels' && check.skippable))
 }
 
-/** The text of a skill's SKILL.md, or null when it is in none of the usual places. */
-const readSkillFile = async ($: Engine, name: string): Promise<string | null> => {
-  let home: string | undefined
+const homeDir = async ($: Engine): Promise<string | undefined> => {
   try {
-    home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+    return (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
   } catch {
     // No home: only the project's skills are tried.
+    return undefined
   }
+}
+
+/**
+ * The loaded skills plus the required ones whose SKILL.md is on disk. The usage list leaves out skills that turn off
+ * model invocation (most of the required ones), so a skill that is installed would otherwise read as missing. Null
+ * only when the usage call fails and no file is found either.
+ */
+const installedSkillNames = async ($: Engine): Promise<string[] | null> => {
+  const loaded = await loadedSkills($)
+  const home = await homeDir($)
+  const onDisk: string[] = []
+  for (const name of REQUIRED_SKILLS) {
+    if (loaded?.includes(name)) continue
+    for (const path of skillFiles(name, home)) {
+      try {
+        if (await $.fs.exists(path)) {
+          onDisk.push(name)
+          break
+        }
+      } catch {
+        // Try the next place.
+      }
+    }
+  }
+  return loaded === null && onDisk.length === 0 ? null : [...(loaded ?? []), ...onDisk]
+}
+
+/** The text of a skill's SKILL.md, or null when it is in none of the usual places. */
+const readSkillFile = async ($: Engine, name: string): Promise<string | null> => {
+  const home = await homeDir($)
   for (const path of skillFiles(name, home)) {
     try {
       return await $.fs.read(path)

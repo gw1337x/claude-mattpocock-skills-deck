@@ -127,10 +127,11 @@ export const parseItem = (path: string, text: string): BoardItem => {
   const status = (fields.get('status') || headerStatus).toLowerCase()
   // DSH cannot reopen, so either place saying closed settles it.
   const closed = CLOSED_STATUSES.has(status) || CLOSED_STATUSES.has(headerStatus)
-  // DSH reads md-v1 labels only from the header; plain files have no other label source, so keep their fields.
+  // DSH reads md-v1 labels from a `Labels:` line, else the `DSH-LABELS` header, and never from the Status word.
+  // Plain files have no other label source, so they keep the Status word.
   const labels =
     fields.get('dsh-format') === 'md-v1'
-      ? splitList(fields.get('dsh-labels'))
+      ? splitList(fields.has('labels') ? fields.get('labels') : fields.get('dsh-labels'))
       : [
           ...new Set([
             ...splitList(fields.get('labels')),

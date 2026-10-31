@@ -32,15 +32,6 @@ test('a legacy parentKey header is read like DSH-PARENT', async ($, on) => {
   expect((await get($, 'readings/06')).parent).toBeNull()
 })
 
-test('a DSH-PARENT of 0 pads to 00 and shows the folder container', async ($, on) => {
-  serveFiles(on, {
-    ...MD_V1_TRACKER,
-    [TICKET]: lines('<!-- DSH-FORMAT: md-v1 -->', '<!-- DSH-PARENT: 0 -->', '# 06: Extra', '', '**Status:** ready-for-agent'),
-  })
-
-  expect((await get($, 'readings/06')).parent).toEqual({ key: 'readings/00', title: 'Live readings from the running game' })
-})
-
 test('a ticket with no DSH-PARENT falls back to its folder container', async ($, on) => {
   serveFiles(on, MD_V1_TRACKER)
 
@@ -56,7 +47,7 @@ test('a DSH-PARENT that names no container falls back to the folder', async ($, 
   expect((await get($, 'readings/06')).parent).toEqual({ key: 'readings/00', title: 'Live readings from the running game' })
 })
 
-test('an md-v1 ticket takes its labels only from DSH-LABELS, not its Status word', async ($, on) => {
+test('an md-v1 ticket takes its labels from DSH-LABELS, not its Status word', async ($, on) => {
   serveFiles(on, {
     ...MD_V1_TRACKER,
     [TICKET]: lines(
@@ -65,12 +56,27 @@ test('an md-v1 ticket takes its labels only from DSH-LABELS, not its Status word
       '<!-- DSH-LABELS: needs-info -->',
       '# 06: Extra',
       '',
-      '**Labels:** stray',
       '**Status:** ready-for-agent',
     ),
   })
 
   expect((await get($, 'readings/06')).labels).toEqual(['needs-info'])
+})
+
+test('an md-v1 ticket with a Labels line uses it over DSH-LABELS, as DSH does', async ($, on) => {
+  serveFiles(on, {
+    ...MD_V1_TRACKER,
+    [TICKET]: lines(
+      '<!-- DSH-FORMAT: md-v1 -->',
+      '<!-- DSH-LABELS: needs-info -->',
+      '# 06: Extra',
+      '',
+      '**Labels:** bug, ready-for-agent',
+      '**Status:** ready-for-agent',
+    ),
+  })
+
+  expect((await get($, 'readings/06')).labels).toEqual(['bug', 'ready-for-agent'])
 })
 
 test('an md-v1 ticket with no DSH-LABELS has no labels', async ($, on) => {

@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
@@ -29,7 +30,7 @@ const keys = async (ui: Ui) => (await ui.findAll({ type: 'Button' })).map(b => b
 
 const { '.scratch/loose/issues/02-garbled.md': _garbled, ...READABLE } = MARKDOWN_TRACKER
 
-const serveBox = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
+const serveBox = (on: On) => {
   const fills: string[] = []
   const held: Record<string, unknown> = {}
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))

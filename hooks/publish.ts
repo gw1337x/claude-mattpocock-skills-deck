@@ -1,19 +1,8 @@
 /** The NoRepoCard's Create and publish (inventory B14): `git init`, a first commit, `gh repo create`, then the push. */
+import type { PublishErrorKind, PublishFailure, Visibility } from '../types'
 import type { Run, RunResult } from './github-tracker'
 
-export type Visibility = 'public' | 'private'
-
-export type PublishErrorKind =
-  | 'bad-name'
-  | 'no-git'
-  | 'no-gh'
-  | 'not-logged-in'
-  | 'already-exists'
-  | 'git-ownership'
-  | 'git-commit-failed'
-  | 'permission'
-  | 'network'
-  | 'unknown'
+export type { PublishErrorKind, PublishFailure, Visibility }
 
 /** DSH's `panel.noRepoErr.*` lines, in English. */
 export const PUBLISH_ERRORS: Record<PublishErrorKind, string> = {
@@ -31,19 +20,6 @@ export const PUBLISH_ERRORS: Record<PublishErrorKind, string> = {
 }
 
 export const HALF_CREATED = 'The repository was created, but the local push did not finish'
-
-/** What a failed publish tells the card; `halfCreated` means the repo exists on GitHub and only the push is left. */
-export type PublishFailure = {
-  ok: false
-  kind: PublishErrorKind
-  message: string
-  /** git's or gh's own words, when there were any. */
-  detail: string
-  halfCreated: boolean
-  owner: string
-  name: string
-  repoUrl: string
-}
 
 export type PublishSuccess = { ok: true; owner: string; name: string; repoUrl: string }
 

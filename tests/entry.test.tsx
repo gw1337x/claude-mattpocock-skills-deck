@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
@@ -31,7 +32,7 @@ const runDeck = ($: Engine, args: string, surface: (typeof SURFACES)[number]) =>
 const keysOf = async (ui: Entry) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '')
 const textsOf = async (ui: Entry) => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').join('\n')
 
-const serveEntry = (on: Parameters<Parameters<typeof test>[1]>[1], mode: 'works' | 'throws' = 'works') => {
+const serveEntry = (on: On, mode: 'works' | 'throws' = 'works') => {
   serveFiles(on, MARKDOWN_TRACKER)
   const log = serveSession(on, mode)
   on('ui.open', () => ({ value: { isPlaced: true } }))

@@ -1,5 +1,3 @@
-import type { PublishFailure, Visibility } from '../hooks/publish'
-
 export type Backend = 'github' | 'markdown'
 
 /** How the repo's domain docs are laid out: one glossary for all, or one per subproject. */
@@ -109,6 +107,39 @@ export type EntryFlow =
   | { step: 'requirement'; kind: 'explore' | 'implementation'; text: string }
   | { step: 'bug'; fields: Record<'actual' | 'expected' | 'reproduction' | 'environment', string>; note?: string }
 
+export type Visibility = 'public' | 'private'
+
+export type PublishErrorKind =
+  | 'bad-name'
+  | 'no-git'
+  | 'no-gh'
+  | 'not-logged-in'
+  | 'already-exists'
+  | 'git-ownership'
+  | 'git-commit-failed'
+  | 'permission'
+  | 'network'
+  | 'unknown'
+
+/** What a failed publish tells the card; `halfCreated` means the repo exists on GitHub and only the push is left. */
+export type PublishFailure = {
+  ok: false
+  kind: PublishErrorKind
+  message: string
+  /** git's or gh's own words, when there were any. */
+  detail: string
+  halfCreated: boolean
+  owner: string
+  name: string
+  repoUrl: string
+}
+
+/** A Version control sync that waits on its confirm popover. */
+export type SyncAction = 'pull' | 'push' | 'set-upstream' | 'recreate-upstream'
+
+/** An open confirm popover: what it will run, and when it opened. */
+export type Confirm = { action: SyncAction; at: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'mattpocock-skills-deck': {
@@ -181,6 +212,16 @@ declare module 'claude-code' {
       restHidden: boolean
       /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */
       suggestions: { items: Suggestion[]; at: number } | null
+      /** Version control: which view shows; absent means Changes. */
+      vcView: 'changes' | 'commits' | 'worktrees'
+      /** Version control: ids of the files whose inline diff is open. */
+      vcDiffs: string[]
+      /** Version control: the commit message being typed. */
+      vcMessage: string
+      /** Version control: the last action's outcome or failure; absent or null shows nothing. */
+      vcNote: string | null
+      /** Version control: the open confirm popover; absent or null means none. */
+      vcConfirm: Confirm | null
     }
   }
 }

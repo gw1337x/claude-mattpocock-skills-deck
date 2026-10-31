@@ -36,9 +36,22 @@ export type DeckTracker = {
   reload?: () => Promise<DeckTracker>
 }
 
+/** Every tool the deck registers; `tool.call` filters on these exact names. */
+export type DeckToolName =
+  | 'deck_context'
+  | 'deck_issue_get'
+  | 'deck_map_snapshot'
+  | 'deck_issue_report'
+  | 'deck_issue_list'
+  | 'deck_issue_create'
+  | 'deck_issue_patch'
+  | 'deck_map_link'
+  | 'deck_map_plan_create'
+  | 'suggest_next_steps'
+
 /** One Deck tool as `$.tool.register` takes it, the schema always in the prompt's tool list. */
 export type DeckToolSpec = {
-  name: string
+  name: DeckToolName
   description: string
   inputSchema: Record<string, unknown>
   isDeferred: false

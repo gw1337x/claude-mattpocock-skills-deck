@@ -110,11 +110,70 @@ export const release = (route: RouteStore, session: string, ticketKey: string, b
     .filter(worker => worker.entries.length > 0),
 })
 
+/** How many times a route write re-reads and recomputes when the store changed under it. */
+const WRITE_ATTEMPTS = 3
+
+const sameRoute = (a: RouteStore, b: RouteStore): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * Changes the shared route without discarding what other sessions wrote meanwhile. The store has no atomic update, so
+ * each attempt reads the route, computes the change, reads again and writes only if nothing moved, then reads back to
+ * see its own write stood. After the last attempt it writes anyway, computed from the freshest read.
+ */
+export const commitRoute = async (
+  read: () => Promise<RouteStore>,
+  write: (route: RouteStore) => Promise<void>,
+  change: (route: RouteStore) => RouteStore,
+): Promise<RouteStore> => {
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+    const base = await read()
+    const next = change(base)
+    if (!sameRoute(await read(), base)) continue
+    await write(next)
+    if (sameRoute(await read(), next)) return next
+  }
+  const next = change(await read())
+  await write(next)
+  return next
+}
+
 /** Every session's entries, newest first, each marked stale once idle for more than a day. */
 export const rowsOf = (route: RouteStore, now: number): RouteRow[] =>
   route.workers
     .flatMap(worker => worker.entries.map(entry => ({ session: worker.session, label: worker.label, entry, stale: now - entry.actionAt > ACTIVE_MS })))
     .sort((a, b) => b.entry.actionAt - a.entry.actionAt)
+
+export type RouteDetail = 'core' | 'standard'
+
+/** DSH's `workRouteDetail`: `standard` when asked for, else `core`. */
+export const detailOf = (value: unknown): RouteDetail => (value === 'standard' ? 'standard' : 'core')
+
+/** The most entries a `core` reply carries. */
+export const CORE_LIMIT = 20
+
+/** What a tool reply says of the route: `core` is key, session and time for the newest few; `standard` adds title and action for all. */
+export type RouteReadout = {
+  detail: RouteDetail
+  total: number
+  omitted: number
+  entries: { ticketKey: string; session: string; actionAt: number; title?: string; action?: string }[]
+}
+
+export const readoutOf = (route: RouteStore, now: number, detail: RouteDetail): RouteReadout => {
+  const rows = rowsOf(route, now)
+  const shown = detail === 'core' ? rows.slice(0, CORE_LIMIT) : rows
+  return {
+    detail,
+    total: rows.length,
+    omitted: rows.length - shown.length,
+    entries: shown.map(({ label, entry }) => ({
+      ticketKey: entry.ticketKey,
+      session: label,
+      actionAt: entry.actionAt,
+      ...(detail === 'standard' ? { title: entry.title, action: entry.action } : {}),
+    })),
+  }
+}
 
 const ACTION_WORDS: Record<string, string> = { report: 'reported', close: 'closed', edit: 'edited', comment: 'commented' }
 

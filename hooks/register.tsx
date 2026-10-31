@@ -1,4 +1,4 @@
-import type { Hook, Register, RenderSurface } from 'claude-code'
+import type { Hook, Register, RenderChildren, RenderSurface } from 'claude-code'
 
 import type { Backend, BoardFilter, EntryFlow, BoardItem, BoardSnapshot, BoardSort, BoardView } from '../types'
 import {
@@ -142,7 +142,7 @@ import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './ove
 import { HANDOFF_DIR, newestHandoff } from './handoff'
 import { claim, newSessionLink, newTitle, readSkillPrompt, slashSkill, stillOpen } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
-import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
+import { actionWord, ago, commitRoute, detailOf, itemFor, numberOf, readoutOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
 /** Puts an Action prompt in the box; asks before replacing a draft, and never sends. */
 type Engine = Parameters<Hook<'session.start'>>[0]
@@ -472,8 +472,18 @@ const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
   }
 }
 
+/** The tools that take `workRouteDetail`, and so end their reply with the Work Route. */
+const REPLIES_WITH_ROUTE = new Set(['deck_issue_report', 'deck_issue_create', 'deck_issue_patch', 'deck_map_link', 'deck_map_plan_create'])
+
 /** Answers one Deck tool call; a refusal reaches the model as the call's error. */
 const answerDeckTool = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
+  const answer = await answerWithoutRoute($, name, input)
+  if (!REPLIES_WITH_ROUTE.has(name) || answer === null || typeof answer !== 'object') return answer
+  const route = await readRoute($, await resolveBackend($))
+  return { ...answer, workRoute: readoutOf(route, await $.clock.now(), detailOf(input.workRouteDetail)) }
+}
+
+const answerWithoutRoute = async ($: Engine, name: string, input: Record<string, unknown>): Promise<unknown> => {
   const found = await findBackend($)
   if (name === 'deck_context') {
     // Naming a GitHub Backend needs no read, so a `gh` failure cannot hide it; Markdown is read for its efforts.
@@ -800,19 +810,51 @@ const entryFor = (backend: Backend, item: BoardItem, action: string, source: Rou
   hasWork: true,
 })
 
+/**
+ * The Work Route table's columns and their widths, shared by the header and every row so they line up. Percentages of the
+ * row, summing under 100 to leave room for the gaps: cells in a fixed count would overflow a narrow Pane, and the desktop
+ * then shrinks each row's cells by a different amount.
+ */
+const ROUTE_COLUMNS = [
+  ['Session', '13%'],
+  ['Ticket', '7%'],
+  ['Title', '36%'],
+  ['Action', '13%'],
+  ['State', '9%'],
+  ['When', '12%'],
+] as const
+const ROUTE_WIDTHS = Object.fromEntries(ROUTE_COLUMNS) as Record<(typeof ROUTE_COLUMNS)[number][0], string>
+
+/**
+ * Applies one session's change to the cross-session route without losing what other sessions wrote meanwhile. A store
+ * that cannot be read is left alone: treating it as empty would overwrite every other session's entries.
+ */
+const changeRoute = async ($: Engine, backend: Backend, change: (route: RouteStore) => RouteStore) => {
+  const key = await routeKey($)
+  try {
+    await commitRoute(
+      async () => routeFrom(await $.store.get(key), backend),
+      route => $.store.set(key, route),
+      change,
+    )
+  } catch {
+    return
+  }
+  $.ui.invalidate('ui.render')
+}
+
 /** Puts an entry on this session's route in the cross-session store, dropping entries past the purge window. */
 const addToRoute = async ($: Engine, backend: Backend, entry: RouteEntry) => {
   const now = await $.clock.now()
-  const next = record(await readRoute($, backend), await sessionId($), entry, backend, now)
-  await $.store.set(await routeKey($), next)
-  $.ui.invalidate('ui.render')
+  const session = await sessionId($)
+  await changeRoute($, backend, route => record(route, session, entry, backend, now))
 }
 
 /** Takes a ticket off this session's route. */
 const dropFromRoute = async ($: Engine, backend: Backend, ticketKey: string) => {
-  const next = release(await readRoute($, backend), await sessionId($), ticketKey, backend, await $.clock.now())
-  await $.store.set(await routeKey($), next)
-  $.ui.invalidate('ui.render')
+  const now = await $.clock.now()
+  const session = await sessionId($)
+  await changeRoute($, backend, route => release(route, session, ticketKey, backend, now))
 }
 
 /** Notes a Ticket the AI just touched, marked auto. */
@@ -1295,11 +1337,13 @@ export const register: Register = on => {
             </Box>
             {rows.length === 0 && <Text dimColor>No Tickets touched in this repo yet.</Text>}
             {rows.length > 0 && (
-              <Box flexDirection="row" columnGap="md">
-                {['Session', 'Ticket', 'Title', 'Action', 'State', 'When'].map(column => (
-                  <Text key={`route-head:${column}`} dimColor size="footnote" weight="semibold">
-                    {column}
-                  </Text>
+              <Box flexDirection="row" columnGap="xs">
+                {ROUTE_COLUMNS.map(([column, width]) => (
+                  <Box key={`route-head:${column}`} width={width} flexShrink={0}>
+                    <Text dimColor size="footnote" weight="semibold">
+                      {column}
+                    </Text>
+                  </Box>
                 ))}
               </Box>
             )}
@@ -1309,24 +1353,38 @@ export const register: Register = on => {
               const when = `${ago(entry.actionAt, now)}${idle ? ' · stale' : ''}`
               const mark = entry.source === 'reported' ? '' : ' · auto'
               const who = owner === session ? 'this session' : label
+              const cell = (column: (typeof ROUTE_COLUMNS)[number][0], content: RenderChildren) => (
+                <Box key={`route:${index}:${column}`} width={ROUTE_WIDTHS[column]} flexShrink={0} alignItems="flex-start">
+                  {content}
+                </Box>
+              )
+              // A Button holds only strings and Text, so the row is a Box of fixed-width cells, each cell a Button that opens the ticket (no label: a desktop would draw it in place of the cell's text).
+              const open = async () => {
+                if (found === undefined) return
+                await $.state.set(TAB, 'list')
+                await $.state.set(DETAIL, found.path)
+                await $.ui.open({ id: PANE, title: PANE_TITLE })
+              }
+              const press = (column: (typeof ROUTE_COLUMNS)[number][0], text: RenderChildren) =>
+                cell(
+                  column,
+                  <Button
+                    key={column === 'Title' ? `route:${index}` : `route:${index}:${column}:open`}
+                    plain
+                    onPress={open}
+                  >
+                    {text}
+                  </Button>,
+                )
               return (
-                <Button
-                  key={`route:${index}`}
-                  label={`route row ${who} · ${entry.ticketKey} · ${entry.title} · ${actionWord(entry.action)}${mark} · ${state} · ${when}`}
-                  plain
-                  onPress={async () => {
-                    if (found === undefined) return
-                    await $.state.set(TAB, 'list')
-                    await $.state.set(DETAIL, found.path)
-                    await $.ui.open({ id: PANE, title: PANE_TITLE })
-                  }}
-                >
-                  <Text dimColor size="footnote">{`${who}  `}</Text>
-                  <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)} `}</Text>
-                  <Text>{`${entry.title} `}</Text>
-                  <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>
-                  <Text dimColor size="footnote">{`  ${state}  ${when}`}</Text>
-                </Button>
+                <Box key={`route-row:${index}`} flexDirection="row" columnGap="xs">
+                  {press('Session', <Text dimColor size="footnote">{who}</Text>)}
+                  {press('Ticket', <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)}`}</Text>)}
+                  {press('Title', <Text wrap="truncate">{entry.title}</Text>)}
+                  {press('Action', <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>)}
+                  {press('State', <Text dimColor size="footnote">{state}</Text>)}
+                  {press('When', <Text dimColor size="footnote">{when}</Text>)}
+                </Box>
               )
             })}
           </Box>

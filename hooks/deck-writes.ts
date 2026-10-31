@@ -4,6 +4,7 @@ import {
   DeckRefusal,
   KEY_SCHEMA,
   SCOPE_SCHEMA,
+  WORK_ROUTE_DETAIL,
   deckIssueGet,
   deckMapSnapshot,
   findItem,
@@ -46,7 +47,6 @@ const WORDS_SCHEMA = {
   required: ['text'],
   additionalProperties: false,
 }
-const WORK_ROUTE_DETAIL = { type: 'string', enum: ['core', 'standard'], description: 'How much of the call the Work Route records.' }
 const KEYS = { type: 'array', items: { type: ['string', 'number'] } }
 
 export const DECK_WRITE_TOOLS: DeckToolSpec[] = [

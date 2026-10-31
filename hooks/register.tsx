@@ -1582,14 +1582,15 @@ ${card.chain}`}</Text>
       const { total, open: openCount, closed: closedCount, percent } = progressOf(children)
       const isMap = container.kind === 'map'
       // The pixel skin is the desktop's; the terminal keeps theme neutrals and the same words.
-      const pixel = Svg !== undefined
+      const pixel = isMap && Svg !== undefined
       let body = ''
+      let unreadable = false
       try {
         body = backend === 'github'
           ? (await readGithubDetail(ghRun($), container.number ?? 0)).body
           : readTicketDetail(await $.fs.read(container.path)).body
       } catch {
-        body = ''
+        unreadable = true
       }
       const sections = isMap ? mapSections(body) : specSections(body)
       const closedSections = (await $.state.get(SECTIONS_CLOSED)).value ?? []
@@ -1646,7 +1647,7 @@ ${card.chain}`}</Text>
                   <Button key={`section:${section.title}`} label={sectionLabel(section)} plain onPress={() => toggleSection(key)}>
                     <Text bold color={ink}>{`${collapsed ? '▸' : '▾'} ${sectionLabel(section)}`}</Text>
                   </Button>
-                  {!collapsed && (section.text === '' ? <Text dimColor>None</Text> : <Markdown text={section.text} />)}
+                  {!collapsed && (section.text === '' ? <Text dimColor>{unreadable ? 'Could not read this body.' : 'None'}</Text> : <Markdown text={section.text} />)}
                 </Box>
               )
             })}

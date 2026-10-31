@@ -30,12 +30,11 @@ export const DSH = {
   inkLight: '#fff9ec',
 } as const satisfies Record<string, Color>
 
-/** DSH's pixel card skin for Map detail: paper, a thick frame and ink, with its dark-mode values (desktop draws them; the terminal keeps theme neutrals). */
+/** DSH's pixel card skin for Map detail: paper, a thick frame and ink, (Map detail on the desktop draws them; the terminal keeps theme neutrals). */
 export const PIXEL = {
   paper: '#f2e4c0',
   frame: '#3a2c14',
   ink: '#2b2113',
-  gold: '#e3a92f',
   map: '#8b5cf6',
   ready: '#10b981',
   claimed: '#2b62b0',

@@ -105,7 +105,7 @@ for (const backend of BACKENDS) {
 
       expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
       expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
-      expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*Ready.*needs-triage/))
+      expect(cards).toContainEqual(expect.stringMatching(/Login crashes on empty password.*Bug.*needs-triage.*Ready/))
       expect(cards.some(c => /Download button/.test(c))).toBe(false)
       await ui.unmount()
     })

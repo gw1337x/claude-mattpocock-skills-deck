@@ -109,6 +109,9 @@ for (const surface of SURFACES) {
     expect(await shown(ui)).toContain('Login crashes')
 
     await ui.press({ key: 'filter:all' })
+    // Closed rows wait under the Closed fold until it is opened.
+    expect(await texts(ui)).not.toContainEqual(expect.stringMatching(/Done thing/))
+    await ui.press({ key: 'closed-toggle' })
     expect(await texts(ui)).toContainEqual(expect.stringMatching(/Done thing/))
     await ui.unmount()
   })

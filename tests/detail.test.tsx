@@ -187,6 +187,7 @@ for (const surface of SURFACES) {
     serveFiles(on, files)
     const ui = (await mount($, surface)) as Typing
 
+    await ui.press({ key: 'closed-toggle' })
     await ui.press({ key: `detail:${BLOCKER}` })
     await ui.input({ key: 'comment', text: 'Hello there.' })
 

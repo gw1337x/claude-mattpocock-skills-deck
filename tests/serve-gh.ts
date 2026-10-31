@@ -89,6 +89,8 @@ export const serveGh = (
     colors?: Record<string, string>
     /** Extra plain open issues (numbered after the fixture's) so a read spans several pages. */
     padIssues?: number
+    /** GraphQL reads fail while the REST read works. */
+    graphqlDown?: boolean
   } = {},
 ): GhServer => {
   const server: GhServer = {
@@ -146,6 +148,20 @@ export const serveGh = (
       return reply(JSON.stringify(server.issues.filter(each => each.body.includes(needle)).map(({ number, body }) => ({ number, body }))))
     }
     if (line.startsWith('issue list')) return reply(JSON.stringify(server.issues))
+    if (argv[1] === 'api' && argv[2] === 'graphql' && options.graphqlDown) return reply('', 1, 'GraphQL: Something went wrong')
+    if (argv[1] === 'api' && argv[2]?.startsWith('repos/{owner}/{repo}/issues?state=all')) {
+      const rest = server.issues.map(each => ({
+        number: each.number,
+        title: each.title,
+        state: each.state.toLowerCase(),
+        labels: each.labels,
+        assignees: each.assignees,
+        updated_at: each.updatedAt,
+        html_url: each.url,
+        body: each.body,
+      }))
+      return reply(JSON.stringify([rest]))
+    }
     if (argv[1] === 'api' && argv[2] === 'graphql') {
       const start = Number(/^cursor=(\d+)$/.exec(flags(argv, '-F').find(each => each.startsWith('cursor=')) ?? '')?.[1] ?? 0)
       const page = server.issues.slice(start, start + PAGE_SIZE)

@@ -37,7 +37,7 @@ for (const surface of SURFACES) {
     expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     expect(cards).toContainEqual(
-      expect.stringMatching(/Bug.*loose #1.*Login crashes on empty password.*Ready.*needs-triage/),
+      expect.stringMatching(/loose #1.*Login crashes on empty password.*Bug.*needs-triage.*Ready/),
     )
     // Children of a Container are not listed on the List.
     expect(cards.some(c => /Download button/.test(c))).toBe(false)
@@ -49,7 +49,7 @@ for (const surface of SURFACES) {
     const ui = await mountList($, surface)
     const cards = await cardTexts(ui)
 
-    expect(cards).toContainEqual(expect.stringMatching(/Ticket.*loose #2.*garbled.*Open/))
+    expect(cards).toContainEqual(expect.stringMatching(/loose #2.*garbled.*Ticket.*Open/))
     expect(cards).toContainEqual(expect.stringMatching(/Could not read this file/))
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Invoice export/))
     await ui.unmount()
@@ -77,7 +77,7 @@ for (const surface of SURFACES) {
     })
     const ui = await mountList($, surface)
 
-    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/Research.*loose #1.*Both labels.*Claimed/))
+    expect(await cardTexts(ui)).toContainEqual(expect.stringMatching(/loose #1.*Both labels.*Research.*Claimed/))
     await ui.unmount()
   })
 

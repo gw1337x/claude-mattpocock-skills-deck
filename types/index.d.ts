@@ -128,6 +128,10 @@ declare module 'claude-code' {
       diagnosticsOpen: boolean
       /** Why the last Palette save did not happen; absent or null shows nothing. */
       paletteNote: string | null
+      /** Hex text typed in the Palette and not saved yet, by label; absent or null means none. */
+      paletteDrafts: Record<string, string> | null
+      /** True while the Palette asks whether to discard unsaved changes before closing. */
+      paletteAsk: boolean
       /** True while the Capsule band's Skills menu is open. */
       skillsMenu: boolean
       /** True while the Capsule band's Work Route list is open. */

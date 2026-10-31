@@ -129,7 +129,7 @@ for (const surface of SURFACES) {
 
     const boxes = (await band.findAll({ type: 'Box' })).map(box => box.key ?? box.props.key)
     expect(boxes.indexOf('suggestions')).toBeGreaterThan(-1)
-    expect(boxes.indexOf('suggestions')).toBeLessThan(boxes.indexOf('status-bar'))
+    expect(boxes.indexOf('suggestions')).toBeLessThan(boxes.indexOf('status-capsule'))
 
     const [reason] = await band.findAll({ key: 'suggest-reason:0' })
     expect(reason?.props.display).toBe('none')

@@ -49,6 +49,7 @@ The one next step the deck offers for a ticket or container, decided by its labe
 **Action prompt**:
 The text an Action puts into the input box for the person to read, edit and send.
 _Avoid_: Injection, auto-prompt
+Kept to match DSH: the Checks buttons "Inject completion guide" and "Inject fix guide" still say "Inject".
 
 **Deck tool**:
 A tool the deck gives the model for reading and changing tickets, or for reporting what it worked on, in the format the deck reads.
@@ -85,6 +86,7 @@ _Avoid_: Board
 **Checks**:
 The Pane tab that scores the project's setup as passed checks over applicable checks, one row per check, each failing row with a way to fix it.
 _Avoid_: Env Check
+Kept to match DSH: the Status capsule segment reads "Env n/t".
 
 **Palette**:
 The Pane view that lists label colours and edits them. Action buttons and label chips take their label's colour from it.

@@ -76,6 +76,27 @@ import {
   type Changes,
   type Section,
 } from './vc'
+import {
+  ACTION_NAMES,
+  askAiText,
+  blockedBecause,
+  CONFIRM_TTL_MS,
+  confirmLive,
+  confirmText,
+  fetchRemote,
+  pushActionOf,
+  readBranch,
+  readCommits,
+  readMidOps,
+  readWorktrees,
+  runSync,
+  type Branch,
+  type Commit,
+  type Confirm,
+  type MidOp,
+  type SyncAction,
+  type Worktree,
+} from './vc-sync'
 import { initPublish, isGitRepo, PUBLISH_ERRORS, retryPush, validName, type PublishResult } from './publish'
 import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE, type Layout } from './workspace'
@@ -227,6 +248,9 @@ const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const VC_DIFFS = { plugin: 'mattpocock-skills-deck', key: 'vcDiffs' } as const
 const VC_MESSAGE = { plugin: 'mattpocock-skills-deck', key: 'vcMessage' } as const
 const VC_NOTE = { plugin: 'mattpocock-skills-deck', key: 'vcNote' } as const
+const VC_VIEW = { plugin: 'mattpocock-skills-deck', key: 'vcView' } as const
+const VC_CONFIRM = { plugin: 'mattpocock-skills-deck', key: 'vcConfirm' } as const
+const VC_CONFIRM_PANE = 'vc-confirm'
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
 const DIAGNOSTICS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'diagnosticsOpen' } as const
@@ -1499,6 +1523,54 @@ ${card.chain}`}</Text>
     )
   })
 
+  on('ui.render', { component: 'Pane', requestId: VC_CONFIRM_PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const confirm: Confirm | null = (await $.state.get(VC_CONFIRM)).value ?? null
+    const closeConfirm = async () => {
+      await $.state.set(VC_CONFIRM, null)
+      await $.ui.close({ id: VC_CONFIRM_PANE })
+    }
+    if (!confirmLive(confirm, await $.clock.now())) {
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          <Text dimColor>This confirmation expired; re-confirm from the Version control tab.</Text>
+          <Button key="vc-confirm-cancel" label="Close" onPress={closeConfirm} />
+        </Box>
+      )
+    }
+    const branch = await readBranch(ghRun($)).catch(() => null)
+    if (branch === null) return <Text dimColor>Git could not be read.</Text>
+    const text = await confirmText(ghRun($), confirm.action, branch)
+    return (
+      <Box flexDirection="column" rowGap="sm">
+        <Text weight="semibold">{text.title}</Text>
+        <Text>{text.body}</Text>
+        <Text dimColor size="footnote">{`This confirmation is valid for ${Math.round(CONFIRM_TTL_MS / 1000)} seconds; re-confirm after expiry. Esc cancels.`}</Text>
+        <Box flexDirection="row" columnGap="sm">
+          <Button key="vc-confirm-cancel" label="Cancel" onPress={closeConfirm} />
+          <Button
+            key="vc-confirm-yes"
+            label={ACTION_NAMES[confirm.action]}
+            variant="primary"
+            onPress={async () => {
+              // Expired between the draw and the press: nothing runs.
+              if (!confirmLive(confirm, await $.clock.now())) return $.ui.invalidate('ui.render')
+              try {
+                await runSync(ghRun($), confirm.action, branch)
+                await $.state.set(VC_NOTE, null)
+              } catch (error) {
+                if (!(error instanceof GitError)) throw error
+                await $.state.set(VC_NOTE, error.message)
+              }
+              await closeConfirm()
+              $.ui.invalidate('ui.render')
+            }}
+          />
+        </Box>
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: SWITCH_PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Text } = elements
@@ -1963,6 +2035,120 @@ ${card.chain}`}</Text>
           return [{ kind: 'meta' as const, text: error.message }]
         }
       }
+      const view: 'changes' | 'commits' | 'worktrees' = (await $.state.get(VC_VIEW)).value ?? 'changes'
+      let branch: Branch = { sync: 'unknown', name: '', oid: '', upstream: '', ahead: 0, behind: 0 }
+      let midOps: MidOp[] = []
+      try {
+        branch = await readBranch(ghRun($))
+        midOps = await readMidOps(ghRun($))
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error
+        problem ??= error.message
+      }
+      const requestSync = async (action: SyncAction) => {
+        const blocked = blockedBecause(action, branch, changes)
+        if (blocked !== null) return $.state.set(VC_NOTE, blocked)
+        await $.state.set(VC_NOTE, null)
+        await $.state.set(VC_CONFIRM, { action, at: await $.clock.now() })
+        await $.ui.open({ id: VC_CONFIRM_PANE, title: (await confirmText(ghRun($), action, branch)).title, focus: true, closeOnEscape: true })
+      }
+      const syncText =
+        branch.sync === 'tracked'
+          ? `${branch.name} → ${branch.upstream} · ahead ${branch.ahead} · behind ${branch.behind}`
+          : branch.sync === 'detached'
+            ? `Detached HEAD at ${branch.oid}`
+            : branch.sync === 'no-upstream'
+              ? `${branch.name} · no upstream yet`
+              : branch.sync === 'upstream-gone'
+                ? `${branch.name} · upstream deleted on remote`
+                : `${branch.name} · sync state unreadable`
+      const needsHelp = note !== null || problem !== null || changes.conflicts.length > 0 || midOps.length > 0
+      const askAi = () => {
+        const text = askAiText({
+          repo,
+          branch,
+          changes,
+          midOps,
+          seeing: note ?? problem ?? (changes.conflicts.length > 0 ? 'Files have unresolved conflicts' : `An unfinished ${midOps.join(', ')}`),
+        })
+        return fillPrompt($, text.body, text.title)
+      }
+      const pushAction = pushActionOf(branch)
+      const vcHeader = (
+        <Box flexDirection="column" rowGap="sm">
+          {tabBar}
+          <Box flexDirection="row" columnGap="sm">
+            {(['changes', 'commits', 'worktrees'] as const).map(each => (
+              <Button key={`vc-view:${each}`} label={each} onPress={() => $.state.set(VC_VIEW, each)}>
+                <Text weight={view === each ? 'semibold' : undefined} dimColor={view !== each}>{each[0]!.toUpperCase() + each.slice(1)}</Text>
+              </Button>
+            ))}
+          </Box>
+          <Box flexDirection="row" alignItems="center" columnGap="sm">
+            <Text key="vc-sync-state" mono>{syncText}</Text>
+            <Box flexGrow={1} />
+            <Button key="vc-fetch" label="Fetch" onPress={() => act(() => fetchRemote(ghRun($)))}>Fetch</Button>
+            <Button key="vc-pull" label="Pull" onPress={() => requestSync('pull')}>Pull</Button>
+            <Button key="vc-push" label={ACTION_NAMES[pushAction]} onPress={() => requestSync(pushAction)}>{ACTION_NAMES[pushAction]}</Button>
+          </Box>
+          {midOps.length > 0 && <Text key="vc-midop" color={DSH.bad}>{`Unfinished operation: ${midOps.join(', ')}`}</Text>}
+          {changes.conflicts.length > 0 && <Text key="vc-conflict-band" color={DSH.bad}>Files have unresolved conflicts; resolve them first</Text>}
+          {needsHelp && (
+            <Button key="vc-ask-ai" label="Ask AI to solve it" onPress={askAi}>
+              Ask AI to solve it
+            </Button>
+          )}
+        </Box>
+      )
+      if (view === 'commits') {
+        let commits: Commit[] = []
+        let failure: string | null = null
+        try {
+          commits = await readCommits(ghRun($))
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error
+          failure = error.message
+        }
+        return (
+          <Box flexDirection="column" rowGap="sm">
+            {vcHeader}
+            <Text bold>{`Commits (${commits.length})`}</Text>
+            {failure !== null && <Text>{failure}</Text>}
+            {failure === null && commits.length === 0 && <Text dimColor>No commits yet.</Text>}
+            {commits.map(each => (
+              <Box key={`vc-commit-row:${each.hash}`} flexDirection="column">
+                <Text>{`${each.hash.slice(0, 7)}  ${each.subject}`}</Text>
+                <Text dimColor size="footnote">{`${each.author} · ${each.date.slice(0, 10)}`}</Text>
+              </Box>
+            ))}
+          </Box>
+        )
+      }
+      if (view === 'worktrees') {
+        let trees: Worktree[] = []
+        let failure: string | null = null
+        try {
+          trees = await readWorktrees(ghRun($))
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error
+          failure = error.message
+        }
+        return (
+          <Box flexDirection="column" rowGap="sm">
+            {vcHeader}
+            <Text bold>{`Worktrees (${trees.length})`}</Text>
+            {failure !== null && <Text>{failure}</Text>}
+            {trees.map(each => (
+              <Box key={`vc-worktree:${each.path}`} flexDirection="column">
+                <Text mono>{each.path}</Text>
+                <Text dimColor size="footnote">
+                  {`${each.bare ? 'bare' : each.detached ? `detached at ${each.head.slice(0, 7)}` : each.branch}${each.locked ? ' · locked' : ''}`}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )
+      }
       const DIFF_COLORS = { add: DSH.ok, remove: DSH.bad, hunk: DSH.link, meta: DSH.muted, context: undefined }
       const row = async (section: Section, change: Change) => {
         const id = `${section}:${change.path}`
@@ -2009,7 +2195,7 @@ ${card.chain}`}</Text>
       const committable = canCommit(changes, message)
       return (
         <Box flexDirection="column" rowGap="sm">
-          {tabBar}
+          {vcHeader}
           <Text bold>{`Changes (${everything})`}</Text>
           {problem !== null && <Text>{problem}</Text>}
           {note !== null && <Text color={DSH.bad}>{note}</Text>}

@@ -106,3 +106,15 @@ The quick Action that writes the session's state to a file another session can c
 **Templates file**:
 The file `docs/agents/templates.yaml` where the person replaces the text of any Action or quick-Action prompt, by DSH's keys (`diagnose`, `fix`, `discuss`, `research`, `prototype`, `takeover`, `supplement`, `execute`, `handoff1`, `handoff2`, `fixate`). Removing an entry restores DSH's text. `fixate` is the key for Consolidate; `handoff1` for Handoff; `handoff2` for Continue.
 _Avoid_: Settings, config
+
+**Guide banner**:
+The one banner above the Status capsule for the first unmet setup step, in DSH's order: pick a Backend, gh missing, gh signed out, no remote, not initialised, skills missing. Its × folds it for the workspace.
+_Avoid_: Setup bar, wizard
+
+**Backend gate**:
+The modal that asks for GitHub or Markdown (GitHub marked Recommended) and the layout, then fills DSH's `setupRun` for them.
+_Avoid_: Backend picker, switch dialog
+
+**Layout**:
+Whether the repo keeps one glossary (`single`) or one per subproject (`multi`), recorded in `docs/agents/workspace.yaml`. Changing it on a set-up workspace fills DSH's `switchLayout`.
+_Avoid_: Context mode

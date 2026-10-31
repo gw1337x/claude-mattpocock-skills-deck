@@ -60,7 +60,19 @@ import {
 } from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
-import { readWorkspace, WORKSPACE_FILE } from './workspace'
+import { readWorkspace, WORKSPACE_FILE, type Layout } from './workspace'
+import {
+  CLI_INSTALL,
+  GATE_BACKENDS,
+  GH_AUTH_LOGIN,
+  installSkills,
+  LAYOUT_OPTIONS,
+  LAYOUT_QUESTION,
+  nextGuide,
+  setupRun,
+  switchLayout,
+  type GuideStepId,
+} from './setup'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { GITHUB_WRITES } from './github-write'
@@ -205,6 +217,7 @@ const COPIED = { plugin: 'mattpocock-skills-deck', key: 'copied' } as const
 const SECTIONS_CLOSED = { plugin: 'mattpocock-skills-deck', key: 'sectionsClosed' } as const
 const COMMENT_PAGES = { plugin: 'mattpocock-skills-deck', key: 'commentPages' } as const
 const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
+const GATE_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'gateChoice' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -628,6 +641,62 @@ const closeEntry = async ($: Engine) => {
   await $.ui.close({ id: ENTRY_PANE })
 }
 
+const GATE_PANE = 'gate'
+
+const guideFoldKey = async ($: Engine) => `guide-folded:${await repoKey($)}`
+const layoutKey = async ($: Engine) => `layout:${await repoKey($)}`
+
+/** The guide step whose banner the person folded in this workspace; null when none is. */
+const readGuideFolded = async ($: Engine): Promise<GuideStepId | null> => {
+  try {
+    const stored = await $.store.get(await guideFoldKey($))
+    return typeof stored === 'string' ? (stored as GuideStepId) : null
+  } catch {
+    return null
+  }
+}
+
+const foldGuide = async ($: Engine, step: GuideStepId) => {
+  try {
+    await $.store.set(await guideFoldKey($), step)
+  } catch {
+    // Without a store the banner folds only until the next draw.
+  }
+  $.ui.invalidate('ui.render')
+}
+
+/** The layout `workspace.yaml` records, else the one the person picked, else single. */
+const readLayout = async ($: Engine): Promise<Layout> => {
+  const recorded = readWorkspace(await $.fs.read(WORKSPACE_FILE).catch(() => '')).layout
+  if (recorded !== null) return recorded
+  try {
+    const stored = await $.store.get(await layoutKey($))
+    if (stored === 'single' || stored === 'multi') return stored
+  } catch {
+    // No store: the default.
+  }
+  return 'single'
+}
+
+const saveLayout = async ($: Engine, layout: Layout) => {
+  try {
+    await $.store.set(await layoutKey($), layout)
+  } catch {
+    // Without a store the choice lasts only this session.
+  }
+}
+
+/** Opens the Backend gate in its own focused Pane; Esc closes it. */
+const openGate = async ($: Engine) => {
+  await $.state.set(GATE_CHOICE, { backend: 'github', layout: await readLayout($) })
+  await $.ui.open({ id: GATE_PANE, title: 'Select a backend', focus: true, closeOnEscape: true })
+}
+
+const closeGate = async ($: Engine) => {
+  await $.state.set(GATE_CHOICE, null)
+  await $.ui.close({ id: GATE_PANE })
+}
+
 /** Shows the List in the Pane with the view the person asked for. */
 const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) => {
   await saveView($, { ...(await readView($)), ...view })
@@ -789,6 +858,19 @@ export const register: Register = on => {
       }
     }
     const env = envChecks === null ? null : scoreOf(envChecks)
+    // One banner at a time, the first unmet step; the person can fold it away for this workspace.
+    const chosen = (await findBackend($))?.backend ?? null
+    const guide = nextGuide(chosen, envChecks)
+    const guideShown = guide !== null && (await readGuideFolded($)) !== guide.step ? guide : null
+    const guideAction = async (step: GuideStepId) => {
+      const fixOf = (id: string) => envChecks?.find(check => check.id === id)?.fix ?? ''
+      if (step === 'backend') return openGate($)
+      if (step === 'gh-cli') return fillPrompt($, CLI_INSTALL)
+      if (step === 'gh-auth') return fillPrompt($, GH_AUTH_LOGIN)
+      if (step === 'remote') return fillPrompt($, fixOf('github-remote'))
+      if (step === 'setup') return fillPrompt($, setupRun(backend, await readLayout($)))
+      return fillPrompt($, installSkills())
+    }
     const envColor = env === null ? GREY_INK : env.passed === env.total ? GREEN : AMBER
     // DSH turns the time red once the snapshot is stale.
     const stale = now - snapshot.readAt > STALE_MS
@@ -846,6 +928,17 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
+        {guideShown && (
+          <Box key="guide" flexDirection="row" alignItems="center" columnGap="sm" flexWrap="wrap">
+            <Text color={guideShown.step === 'backend' ? BLUE : AMBER}>{guideShown.text}</Text>
+            <Button key="guide-action" label={guideShown.button} onPress={() => guideAction(guideShown.step)}>
+              <Text color={guideShown.step === 'backend' ? BLUE : AMBER} weight="semibold">{guideShown.button}</Text>
+            </Button>
+            <Button key="guide-fold" label="Fold" dimColor onPress={() => foldGuide($, guideShown.step)}>
+              ×
+            </Button>
+          </Box>
+        )}
         {routeOpen && (
           <Box key="route-panel" flexDirection="column" borderStyle="round" borderColor={DSH.border} padding="sm" rowGap="xs">
             <Box flexDirection="row" columnGap="sm">
@@ -1164,6 +1257,46 @@ ${card.chain}`}</Text>
         <Button key="bug-file" label="File bug" onPress={file}>
           <Text color={bugIsEmpty(flow.fields) ? DSH.muted : KIND_STYLES.bug.color}>✱ File bug</Text>
         </Button>
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: GATE_PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const choice = (await $.state.get(GATE_CHOICE)).value
+    if (!choice) return <Text dimColor>Nothing to choose.</Text>
+    return (
+      <Box flexDirection="column" rowGap="sm">
+        <Text weight="semibold">Select a backend</Text>
+        <Text dimColor size="footnote">The issue-tracker template for the selected backend will be generated</Text>
+        {GATE_BACKENDS.map(each => (
+          <Button key={`gate:${each.id}`} label={each.name} onPress={() => $.state.set(GATE_CHOICE, { ...choice, backend: each.id })}>
+            <Text color={each.id === 'github' ? BLUE : GREEN} weight={choice.backend === each.id ? 'semibold' : undefined}>
+              {`${choice.backend === each.id ? '●' : '○'} ${each.name}`}
+            </Text>
+            <Text dimColor>{` ${each.id}`}</Text>
+            {each.recommended && <Text color={GREEN}>{' Recommended'}</Text>}
+          </Button>
+        ))}
+        <Text dimColor size="footnote">{LAYOUT_QUESTION}</Text>
+        {LAYOUT_OPTIONS.map(each => (
+          <Button key={`gate-layout:${each.id}`} label={each.name} onPress={() => $.state.set(GATE_CHOICE, { ...choice, layout: each.id })}>
+            <Text weight={choice.layout === each.id ? 'semibold' : undefined}>{`${choice.layout === each.id ? '●' : '○'} ${each.name}`}</Text>
+          </Button>
+        ))}
+        <Box flexDirection="row" columnGap="sm">
+          <Button key="gate-cancel" label="Cancel" onPress={() => closeGate($)} />
+          <Button
+            key="gate-confirm"
+            label="Confirm and continue"
+            variant="primary"
+            onPress={async () => {
+              await saveLayout($, choice.layout)
+              await closeGate($)
+              await fillPrompt($, setupRun(choice.backend, choice.layout))
+            }}
+          />
+        </Box>
       </Box>
     )
   })
@@ -1500,6 +1633,7 @@ ${card.chain}`}</Text>
       // Drawing is pure: before the first run (the Pane opened on this tab) check live, store nothing.
       const checks = (await $.state.get(ENV_CHECKS)).value ?? (await runEnvChecks($, backend))
       const { passed, total } = scoreOf(checks)
+      const layout = await readLayout($)
       return (
         <Box flexDirection="column">
           {tabBar}
@@ -1513,6 +1647,24 @@ ${card.chain}`}</Text>
             {trackerDocMissing(checks) && (
               <Button key="run-setup" label="Run setup" onPress={() => fillPrompt($, SETUP_PROMPT)} />
             )}
+          </Box>
+          <Box flexDirection="column" marginTop="sm">
+            <Text dimColor size="footnote">{LAYOUT_QUESTION}</Text>
+            {LAYOUT_OPTIONS.map(each => (
+              <Button
+                key={`layout:${each.id}`}
+                label={each.name}
+                onPress={async () => {
+                  if (each.id === layout) return
+                  await saveLayout($, each.id)
+                  // A set-up workspace records the layout in the repo, so the change is for the model to align.
+                  if (!trackerDocMissing(checks)) await fillPrompt($, switchLayout(layout, each.id))
+                  $.ui.invalidate('ui.render')
+                }}
+              >
+                <Text weight={layout === each.id ? 'semibold' : undefined}>{`${layout === each.id ? '●' : '○'} ${each.name}`}</Text>
+              </Button>
+            ))}
           </Box>
           {checks.map(check => (
             <Box key={`check:${check.id}`} flexDirection="column">

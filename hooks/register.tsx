@@ -7,6 +7,7 @@ import {
   CONTINUE_PROMPT,
   containerAction,
   CONSOLIDATE_PROMPT,
+  fill,
   HANDOFF_PROMPT,
   HEALTH_CHECK_PROMPT,
   NEW_MAP_PROMPT,
@@ -14,6 +15,7 @@ import {
   progressOf,
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
+import { cells, FOLD_PRIORITY, wordsShown, type Segment } from './capsule'
 import { debugNote } from './debug-log'
 import {
   actionText,
@@ -78,11 +80,10 @@ const readOverrides = async ($: Engine): Promise<Overrides> =>
 const stampOf = (ms: number) => new Date(ms).toISOString().replace(/\D/g, '').replace(/^(\d{8})(\d{6})(\d{3}).*$/, '$1-$2-$3')
 
 /** A quick-Action's prompt, with the person's override in place of DSH's text if there is one. */
-const quickPrompt = async ($: Engine, key: 'handoff1' | 'handoff2' | 'fixate', fallback: string) =>
-  fillPrompt(
-    $,
-    promptFor(key, await readOverrides($), fallback, { ts: stampOf(await $.clock.now()) }, debugNote),
-  )
+const quickPrompt = async ($: Engine, key: 'handoff1' | 'handoff2' | 'fixate', fallback: string) => {
+  const values = { ts: stampOf(await $.clock.now()) }
+  return fillPrompt($, promptFor(key, await readOverrides($), fill(fallback, values), values, debugNote))
+}
 
 /** `title` is what the session is called once this prompt is sent; null marks a draft, undefined a prompt that never renames. */
 const fillPrompt = async ($: Engine, text: string, title?: string | null) => {
@@ -141,8 +142,8 @@ const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as con
 const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
-const BAND_COLLAPSED = { plugin: 'mattpocock-skills-deck', key: 'bandCollapsed' } as const
 const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
+const REFRESHING = { plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
   try {
@@ -174,6 +175,7 @@ const sessionId = async ($: Engine): Promise<string> => {
 }
 
 const overrideKey = async ($: Engine) => `backend:${await repoKey($)}`
+const collapsedKey = async ($: Engine) => `capsule-collapsed:${await repoKey($)}`
 const routeKey = async ($: Engine) => `route:${await repoKey($)}`
 
 /** Every session's route in this repo; an unreadable or older store is an empty route. */
@@ -311,11 +313,34 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
 
 /** Re-reads the tracker into the session's snapshot, which the Pane draws from. */
 const refresh = async ($: Engine) => {
+  await $.state.set(REFRESHING, true)
   try {
-    await $.state.set(SNAPSHOT, await readBoard($, await resolveBackend($)))
+    const backend = await resolveBackend($)
+    await $.state.set(SNAPSHOT, await readBoard($, backend))
+    await $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
   } catch {
     // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
+  } finally {
+    await $.state.set(REFRESHING, false)
   }
+}
+
+/** Whether the capsule is collapsed in this workspace; remembered across sessions, expanded when the store cannot say. */
+const readCollapsed = async ($: Engine): Promise<boolean> => {
+  try {
+    return (await $.store.get(await collapsedKey($))) === true
+  } catch {
+    return false
+  }
+}
+
+const setCollapsed = async ($: Engine, collapsed: boolean) => {
+  try {
+    await $.store.set(await collapsedKey($), collapsed)
+  } catch {
+    // Without a store the choice lasts only until the next draw.
+  }
+  $.ui.invalidate('ui.render')
 }
 
 /** The label colours the Backend holds; a failed `gh` call draws with none. */
@@ -616,7 +641,8 @@ export const register: Register = on => {
     const loaded = menuOpen ? await loadedSkills($) : []
     const installed = installedMattSkills(loaded ?? [])
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
-    const collapsed = (await $.state.get(BAND_COLLAPSED)).value ?? false
+    const collapsed = await readCollapsed($)
+    const refreshing = (await $.state.get(REFRESHING)).value ?? false
     const now = await $.clock.now()
     const backend = await resolveBackend($)
     const route = await readRoute($, backend)
@@ -625,7 +651,15 @@ export const register: Register = on => {
     const latest = rows.find(row => row.session === session)?.entry
     const boardItem = (ticketKey: string) => snapshot.items.find(each => keyOf(backend, each) === ticketKey)
     // Only a score the Checks already worked out; the band never runs the checks itself.
-    const envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
+    let envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
+    if (envChecks === null && !collapsed) {
+      // Until a refresh has scored the setup, score it for this draw; a draw stores nothing.
+      try {
+        envChecks = await runEnvChecks($, backend)
+      } catch {
+        envChecks = null
+      }
+    }
     const env = envChecks === null ? null : scoreOf(envChecks)
     const envColor = env === null ? GREY_INK : env.passed === env.total ? GREEN : AMBER
     // DSH turns the time red once the snapshot is stale.
@@ -635,14 +669,52 @@ export const register: Register = on => {
     // The entry animation plays only while the pills are new, and never for someone who asked for reduced motion.
     const entering = Svg !== undefined && suggestions !== null && now - suggestions.at < ENTRY_MS && !(await reducedMotion($))
 
-    /** One control of the status bar: an icon, a word and a count, all in one colour, named by `label`. */
-    const item = (key: string, label: string, color: string, onPress: () => unknown, icon: string, word?: string, count?: number) => (
-      <Button key={key} label={label} plain onPress={onPress}>
-        <Text color={color}>{icon}</Text>
-        {word !== undefined && <Text color={color} weight="medium">{` ${word}`}</Text>}
-        {count !== undefined && <Text color={color} weight="semibold" tabular>{` ${count}`}</Text>}
-      </Button>
-    )
+    /** One control of the capsule: an icon, a score, a count and a word, all in one colour, named by `label`; `scope` joins a hover group. */
+    const item = (
+      key: string,
+      label: string,
+      color: string,
+      onPress: () => unknown,
+      icon: string,
+      word?: string,
+      count?: number,
+      scope?: string,
+      score?: string,
+    ) => {
+      const button = (
+        <Button key={key} label={label} plain onPress={onPress}>
+          <Text color={color}>{icon}</Text>
+          {score !== undefined && <Text color={color} weight="semibold" tabular>{` ${score}`}</Text>}
+          {count !== undefined && <Text color={color} weight="semibold" tabular>{` ${count}`}</Text>}
+          {word !== undefined && <Text color={color} weight="medium">{` ${word}`}</Text>}
+        </Button>
+      )
+      return scope === undefined ? (
+        button
+      ) : (
+        <Box key={`${key}:scope`} flexShrink={0} hover={{ scope }}>
+          {button}
+        </Box>
+      )
+    }
+
+    // Words fold in DSH's priority order as the width shrinks; icons, counts and scores stay.
+    const timeAgo = ago(snapshot.readAt, now)
+    const tooltip = `Updated ${timeAgo}, read at ${clockTime(snapshot.readAt)}`
+    const routeId = latest ? `#${numberOf(latest.ticketKey)}` : ''
+    const segments: Segment[] = [
+      { id: 'brand', fixed: 2, word: cells(' Skills Deck'), priority: FOLD_PRIORITY.brand },
+      { id: 'route', fixed: 2 + (routeId ? cells(routeId) + 1 : 0), word: cells(' Route'), priority: FOLD_PRIORITY.route },
+      { id: 'ready', fixed: 2 + cells(` ${ready}`), word: cells(' Ready'), priority: FOLD_PRIORITY.ready },
+      { id: 'bug', fixed: 2 + cells(` ${bugs}`), word: cells(' BUG'), priority: FOLD_PRIORITY.bug },
+      { id: 'triage', fixed: 2 + cells(` ${needsTriage}`), word: cells(' Triage'), priority: FOLD_PRIORITY.triage },
+      { id: 'consolidate', fixed: 2, word: cells(' Consolidate'), priority: FOLD_PRIORITY.consolidate },
+      { id: 'handoff', fixed: 4, word: cells(' Handoff'), priority: FOLD_PRIORITY.handoff },
+      { id: 'env', fixed: 2 + (env === null ? 0 : cells(` ${env.passed}/${env.total}`)), word: cells(' Env'), priority: FOLD_PRIORITY.env },
+      { id: 'refresh', fixed: 2, word: cells(` ${timeAgo}`), priority: FOLD_PRIORITY.refresh },
+      { id: 'skills', fixed: 2, word: cells(' Skills'), priority: FOLD_PRIORITY.skills },
+    ]
+    const words = wordsShown(segments, e.props.bodyColumns)
 
     return (
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
@@ -749,58 +821,98 @@ export const register: Register = on => {
             </Box>
           </Box>
         )}
-        <Box
-          key="status-bar"
-          flexDirection="row"
-          justifyContent="space-between"
-          alignItems="center"
-          columnGap="md"
-          borderStyle="round"
-          borderColor={DSH.border}
-          paddingX="md"
-          paddingY="xs"
-        >
-          {item('open-deck', 'Skills Deck', DSH.text, () => openBoard($, { filter: 'all', chips: [] }), '◷')}
-          {item(
-            'route',
-            latest ? `Work Route #${numberOf(latest.ticketKey)}` : 'Work Route',
-            routeOpen ? BLUE : GREY_INK,
-            () => $.state.set(ROUTE_OPEN, !routeOpen),
-            '⌖',
-            latest ? `#${numberOf(latest.ticketKey)}` : 'Route',
-          )}
-          {item('count:ready', `Ready ${ready}`, GREEN, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', 'Ready', ready)}
-          {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', 'BUG', bugs)}
-          {item(
-            'count:needs-triage',
-            `Triage ${needsTriage}`,
-            AMBER,
-            () => openBoard($, { filter: 'open', chips: ['needs-triage'] }),
-            '⌕',
-            'Triage',
-            needsTriage,
-          )}
-          {!collapsed && item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', 'Consolidate')}
-          {!collapsed && item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', 'Handoff')}
-          {!collapsed && item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘')}
-          {!collapsed &&
-            item(
-              'checks',
-              env === null ? 'Checks' : `Checks ${env.passed}/${env.total}`,
-              envColor,
-              async () => {
-                await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
-                await $.state.set(TAB, 'checks')
-                await $.state.set(DETAIL, null)
-                await $.ui.open({ id: PANE, title: PANE_TITLE })
-              },
-              env !== null && env.passed < env.total ? '⚠' : '✓',
-            )}
-          {!collapsed &&
-            item('refresh-band', `Updated ${clockTime(snapshot.readAt)}`, stale ? RED : GREY_INK, () => refresh($), '↻', clockTime(snapshot.readAt))}
-          {!collapsed && item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞')}
-          {item('band-collapse', collapsed ? 'Expand' : 'Collapse', GREY_INK, () => $.state.set(BAND_COLLAPSED, !collapsed), collapsed ? '⌃' : '⌄')}
-        </Box>
+        {collapsed ? (
+          <Box key="status-collapsed" flexDirection="row" flexShrink={0}>
+            {item('band-expand', 'Expand Skills Deck', GREY_INK, () => setCollapsed($, false), '⌃', 'Expand Skills Deck')}
+          </Box>
+        ) : (
+          <Box key="status-capsule" flexDirection="column" flexShrink={0}>
+            <Box
+              key="status-bar"
+              flexDirection="row"
+              flexWrap="nowrap"
+              justifyContent="space-between"
+              alignItems="center"
+              columnGap="xs"
+              borderStyle="round"
+              borderColor={DSH.border}
+              paddingX="sm"
+              overflow="hidden"
+            >
+              {item('open-deck', 'Skills Deck', DSH.text, () => openBoard($, { filter: 'all', chips: [] }), '◷', words.has('brand') ? 'Skills Deck' : undefined)}
+              {item(
+                'route',
+                latest ? `Work Route #${numberOf(latest.ticketKey)}` : 'Work Route',
+                routeOpen ? BLUE : GREY_INK,
+                () => $.state.set(ROUTE_OPEN, !routeOpen),
+                '⌖',
+                words.has('route') ? 'Route' : undefined,
+                undefined,
+                undefined,
+                routeId || undefined,
+              )}
+              {item('count:ready', `Ready ${ready}`, GREEN, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', words.has('ready') ? 'Ready' : undefined, ready, 'menu:ready')}
+              {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', words.has('bug') ? 'BUG' : undefined, bugs, 'menu:bug')}
+              {item(
+                'count:needs-triage',
+                `Triage ${needsTriage}`,
+                AMBER,
+                () => openBoard($, { filter: 'open', chips: ['needs-triage'] }),
+                '⌕',
+                words.has('triage') ? 'Triage' : undefined,
+                needsTriage,
+              )}
+              {item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', words.has('consolidate') ? 'Consolidate' : undefined)}
+              {item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', words.has('handoff') ? 'Handoff' : undefined)}
+              {item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘')}
+              {item(
+                'checks',
+                env === null ? 'Checks' : `Checks ${env.passed}/${env.total}`,
+                envColor,
+                async () => {
+                  await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
+                  await $.state.set(TAB, 'checks')
+                  await $.state.set(DETAIL, null)
+                  await $.ui.open({ id: PANE, title: PANE_TITLE })
+                },
+                env !== null && env.passed < env.total ? '⚠' : '✓',
+                words.has('env') ? 'Env' : undefined,
+                undefined,
+                undefined,
+                env === null ? undefined : `${env.passed}/${env.total}`,
+              )}
+              {item(
+                'refresh-band',
+                refreshing ? 'Refreshing' : tooltip,
+                stale ? RED : GREY_INK,
+                () => refresh($),
+                refreshing ? '◌' : '↻',
+                words.has('refresh') ? timeAgo : undefined,
+                undefined,
+                'tip:refresh',
+              )}
+              {item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞', words.has('skills') ? 'Skills' : undefined)}
+              {/* The debug-dot slot: the debug log's menu draws here once the log is on. */}
+              {item('band-collapse', 'Collapse', GREY_INK, () => setCollapsed($, true), '⌄')}
+            </Box>
+            {/* One fixed row the hovered segment's menu or tooltip swaps into, so a hover never moves the capsule. */}
+            <Box key="status-reveal" position="relative" height={1}>
+              <Box key="reveal:ready" position="absolute" top={0} left={0} display="none" hover={{ scope: 'menu:ready', display: 'flex' }}>
+                <Button key="new-requirement" label="New Requirement" onPress={() => startNew($)}>
+                  <Text color={GREEN}>{'＋ New Requirement'}</Text>
+                </Button>
+              </Box>
+              <Box key="reveal:bug" position="absolute" top={0} left={0} display="none" hover={{ scope: 'menu:bug', display: 'flex' }}>
+                <Button key="new-bug" label="New" onPress={() => startBug($)}>
+                  <Text color={RED}>{'＋ New'}</Text>
+                </Button>
+              </Box>
+              <Box key="reveal:refresh" position="absolute" top={0} left={0} display="none" hover={{ scope: 'tip:refresh', display: 'flex' }}>
+                <Text dimColor>{tooltip}</Text>
+              </Box>
+            </Box>
+          </Box>
+        )}
       </Box>
     )
   })

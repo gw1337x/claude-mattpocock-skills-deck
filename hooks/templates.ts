@@ -250,6 +250,42 @@ This ticket needs a human hand: advance it with the wayfinder skill; everything 
 - [ ] Before finishing, write the true state and next step of this ticket into its body.
 
 ${TOOLS}`,
+  fixate: `This phase wraps up here. Pause progress and run the "alignment & consolidation" pass, from first principles:
+
+## Consolidate
+- [ ] Restate everything I have explicitly answered since this session started, in five categories (each item = my question → your answer): Destination / Constraints & preferences / Confirmed decisions / Open questions / Fog (dimly visible but not yet clear)
+- [ ] No compression, no merging — rather verbose than omitted; list everything in one go, no batching
+- [ ] Annotate each item with its source: my question (short) + a key quote of your original words (≤50 chars, truncate with ellipsis if longer) + a context hint (e.g. topic/turn) so I know where it came from
+
+## Suspected omissions
+- [ ] Add a separate "Suspected omissions" section:
+  - [ ] Questions I asked, you answered, but I did not include above (first priority — guard against forgetting your answers)
+  - [ ] Things you mentioned but I judged off-topic, too vague, or execution detail and did not include
+  - [ ] State my judgment reason for each; you decide whether to keep or drop
+
+## Review
+- [ ] Stop after listing (including "Suspected omissions") and wait for my item-by-item review; once I confirm or correct, you persist the list
+
+## Persist
+- [ ] If a corresponding ticket exists → write all outcomes into that ticket body (a new or merged "## Alignment outcomes" section, with date); do not write into the map body — the map is an index, outcomes belong to the ticket
+- [ ] If no corresponding ticket but within a map → write an alignment note to \`.scratch/alignment/<ts>-<short>.md\` (relative to the current working directory; short ≤20 chars, hyphen or underscore instead of spaces), and append a one-line pointer (path + date) to the map Notes
+- [ ] If no ticket and no map → write the alignment note and tell me the full path; when a map/ticket is created, the taking-over session migrates it into the corresponding ticket
+- [ ] Map-level items (e.g. Destination/Fog adjustments) → still write them in the chosen place, and mark the item "map-level, migrate when the map is built"
+
+${TOOLS}`,
+  handoff1: `/handoff Create a handoff doc from this session, written to .scratch/handoff/{ts}-<short>.md (relative to the current working directory). <short> is a brief title you give this handoff (zh ≤10 chars / en ≤20 chars, in the current session language, use hyphen or underscore instead of spaces) so a human can tell at a glance what it is about.
+
+This doc is for an agent with no memory of this session — write from its perspective, so it can continue seamlessly without guessing or revisiting this session. Approach from first principles.`,
+  handoff2: `Read the handoff doc {path} (from the previous session), restate your understanding, then continue:
+
+## Restate understanding
+- [ ] Conclusions: decisions and outcomes confirmed this session
+- [ ] Unfinished: what to continue next
+- [ ] Suggested skills: skills the new session should load
+- [ ] Restate the three points to me; if anything is missing or uncertain → ask me first, do not guess
+
+## Continue
+- [ ] From first principles, continue with the unfinished work`,
 }
 
 export type TemplateName = keyof typeof TEMPLATES

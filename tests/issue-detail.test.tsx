@@ -86,7 +86,7 @@ for (const surface of SURFACES) {
 
   test(`comments page in batches with Load next on ${surface}`, async ($, on) => {
     serveFiles(on, GH_TRACKER)
-    serveGh(on, { comments: { 3: COMMENTS } })
+    serveGh(on, { comments: { 3: [...COMMENTS] } })
     const ui = await mount($, surface)
 
     await ui.press({ key: 'detail:gh:1' })
@@ -126,6 +126,20 @@ for (const surface of SURFACES) {
 
     expect(await ui.findAll({ type: 'Input', key: 'comment' })).toHaveLength(0)
     expect(await texts(ui)).toContainEqual(expect.stringMatching(/read-only access/))
+    await ui.unmount()
+  })
+
+  test(`posting on GitHub shows the new comment even past the first page on ${surface}`, async ($, on) => {
+    serveFiles(on, GH_TRACKER)
+    const gh = serveGh(on, { comments: { 3: [...COMMENTS] } })
+    const ui = (await mount($, surface)) as Ui & { input: (target: { key: string; text: string }) => Promise<unknown> }
+
+    await ui.press({ key: 'detail:gh:1' })
+    await ui.press({ key: 'detail:gh:3' })
+    await ui.input({ key: 'comment', text: 'Brand new.' })
+
+    expect(gh.comments[3]).toContain('Brand new.')
+    expect(await shown(ui)).toContain('Brand new.')
     await ui.unmount()
   })
 }

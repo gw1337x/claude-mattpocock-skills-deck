@@ -80,6 +80,6 @@ export const COMMENT_PAGE = 10
 
 /** `pages` extra pages of comments after the first: those shown, the size of the next page, and the pages loaded. */
 export const commentsPage = (comments: string[], pages: number) => {
-  const loaded = Math.min(comments.length, (pages + 1) * COMMENT_PAGE)
+  const loaded = Math.min(comments.length, Math.min(pages, comments.length) * COMMENT_PAGE + COMMENT_PAGE)
   return { shown: comments.slice(0, loaded), next: Math.min(COMMENT_PAGE, comments.length - loaded), pages }
 }

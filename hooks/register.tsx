@@ -1328,6 +1328,8 @@ ${card.chain}`}</Text>
       } else {
         await $.fs.write(item.path, appendComment(await $.fs.read(item.path), comment, new Date(await $.clock.now())))
       }
+      // The new comment is last, so show every page.
+      await $.state.set(COMMENT_PAGES, { path: item.path, pages: Number.MAX_SAFE_INTEGER })
       await refresh($)
     }
     const switchBackend = async (chosen: Backend) => {

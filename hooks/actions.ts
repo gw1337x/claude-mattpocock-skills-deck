@@ -159,16 +159,54 @@ export const healthCheckPrompt = (backend: 'github' | 'markdown'): string => {
   return fill(TEMPLATES.healthCheck, { subject })
 }
 
-export const NEW_MAP_PROMPT =
-  '/wayfinder\n\nStart a new Map: ask me what I am trying to explore, then lay out its Notes, Decisions so far and Fog.'
+/** The two ways to start a New Requirement, as the Entry Chooser names them. */
+export type EntryKind = 'explore' | 'implementation'
 
-export const NEW_SPEC_PROMPT =
-  '/grill-with-docs\n\nGrill me on what I want to build. When we are done, run /to-spec to write the Spec, ' +
-  'then /to-tickets to split it into tickets.'
+/** The Entry Chooser's cards: DSH's words and skill chains, and the title a session started from each gets. */
+export const ENTRY_CARDS: { kind: EntryKind; name: string; blurb: string; chain: string; title: string; template: 'newWayfinder' | 'newSpec' }[] = [
+  {
+    kind: 'explore',
+    name: 'Explore map',
+    blurb: 'Big, fuzzy goal',
+    chain: '/wayfinder → /grilling, /research, /prototype → /to-spec → /to-tickets',
+    title: 'New Requirement',
+    template: 'newWayfinder',
+  },
+  {
+    kind: 'implementation',
+    name: 'Implementation map',
+    blurb: 'Goal is clear',
+    chain: '/grill-with-docs → /domain-modeling → /to-spec → /to-tickets',
+    title: 'Impl map',
+    template: 'newSpec',
+  },
+]
 
-export const BUG_PROMPT =
-  '/wayfinder\n\nI want to report a bug. Ask me questions until the bug is clear, scan the tracker for duplicates, ' +
-  'and if there is none file it as a ticket labelled `bug` and `needs-triage`.'
+/** DSH's newWayfinder or newSpec, with the requirement after `Requirement: `. */
+export const requirementPrompt = (kind: EntryKind, repo: string, requirement: string): string => {
+  const card = ENTRY_CARDS.find(c => c.kind === kind)!
+  return `${fill(TEMPLATES[card.template], { repo })}
+
+Requirement: ${requirement.trim()}`
+}
+
+/** The four blanks of +BUG, in DSH's order. */
+export const BUG_FIELDS = ['actual', 'expected', 'reproduction', 'environment'] as const
+export type BugField = (typeof BUG_FIELDS)[number]
+export type BugFields = Record<BugField, string>
+
+export const EMPTY_BUG: BugFields = { actual: '', expected: '', reproduction: '', environment: '' }
+
+/** True while every one of the four fields is blank: nothing to file yet. */
+export const bugIsEmpty = (fields: BugFields): boolean => BUG_FIELDS.every(field => fields[field].trim() === '')
+
+/** DSH's newBugWayfinder followed by newBugFields with the reporter's answers after each label. */
+export const bugPrompt = (repo: string, fields: BugFields): string => {
+  const values = Object.fromEntries(
+    BUG_FIELDS.map(field => [field, fields[field].trim() === '' ? '' : ` ${fields[field].trim()}`]),
+  )
+  return fill(TEMPLATES.newBugWayfinder, { repo }) + fill(TEMPLATES.newBugFields, values)
+}
 
 /** DSH's `handoff1`; `{ts}` is filled when the button is pressed. */
 export const HANDOFF_PROMPT = TEMPLATES.handoff1

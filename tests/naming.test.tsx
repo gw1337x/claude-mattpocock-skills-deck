@@ -67,24 +67,6 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`sending a New Map prompt titles the session [Draft] on ${surface}`, async ($, on) => {
-    serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveSession(on)
-    on('tool.call', { tool: 'AskUserQuestion' }, (_, e) => {
-      const question = (e as { questions?: { question: string }[] }).questions?.[0]?.question ?? ''
-      return { result: { questions: [], answers: { [question]: 'Map' } } } as never
-    })
-    const ui = await mountPane($)
-
-    await ui.press({ key: 'pane-new' })
-    await $.prompt.submit({ text: log.filled, wait: false, origin: COMPOSER })
-    await turnComplete($)
-
-    expect(log.renames).toHaveLength(1)
-    expect(log.renames[0]).toMatch(/^\[Draft\] Start a new Map/)
-    await ui.unmount()
-  })
-
   test(`a later deck prompt replaces the deck's own title on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveSession(on)

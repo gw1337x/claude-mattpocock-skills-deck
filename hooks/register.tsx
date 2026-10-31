@@ -1,18 +1,22 @@
 import type { Hook, Register, RenderSurface } from 'claude-code'
 
-import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView } from '../types'
+import type { Backend, BoardFilter, EntryFlow, BoardItem, BoardSnapshot, BoardSort, BoardView } from '../types'
 import {
   actionFor,
-  BUG_PROMPT,
+  BUG_FIELDS,
+  bugIsEmpty,
+  bugPrompt,
+  EMPTY_BUG,
+  ENTRY_CARDS,
   CONTINUE_PROMPT,
   containerAction,
   CONSOLIDATE_PROMPT,
   fill,
   HANDOFF_PROMPT,
   healthCheckPrompt,
-  NEW_MAP_PROMPT,
-  NEW_SPEC_PROMPT,
   progressOf,
+  requirementPrompt,
+  type BugField,
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { cells, FOLD_PRIORITY, wordsShown, type Segment } from './capsule'
@@ -185,7 +189,8 @@ const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
-const REFRESHING = { plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
+const ENTRY_FLOW = { plugin: 'mattpocock-skills-deck', key: 'entryFlow' } as const
+const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
   try {
@@ -547,17 +552,22 @@ const SORTS: [BoardSort, string][] = [
 const PANE = 'deck'
 const PANE_TITLE = 'Skills Deck'
 
-const NEW_PROMPTS = { Map: NEW_MAP_PROMPT, Spec: NEW_SPEC_PROMPT } as const
+const ENTRY_PANE = 'entry'
 
-/** The New flow: ask Map or Spec, then fill the matching prompt. Returns false if the question is dismissed. */
-const startNew = async ($: Engine): Promise<boolean> => {
-  const answer = await $.ui.ask('What are you starting?', ['Map', 'Spec'])
-  if (answer !== 'Map' && answer !== 'Spec') return false
-  await fillPrompt($, NEW_PROMPTS[answer], null)
-  return true
+/** Opens the Entry Chooser (New Requirement) or the +BUG form in their own focused Pane; Esc closes it. */
+const startEntry = async ($: Engine, flow: EntryFlow): Promise<void> => {
+  await $.state.set(ENTRY_FLOW, flow)
+  await $.ui.open({ id: ENTRY_PANE, title: flow.step === 'bug' ? 'New Bug' : 'New Requirement', focus: true, closeOnEscape: true })
 }
 
-const startBug = ($: Engine) => fillPrompt($, BUG_PROMPT)
+const startNew = ($: Engine) => startEntry($, { step: 'choose' })
+
+const startBug = ($: Engine) => startEntry($, { step: 'bug', fields: EMPTY_BUG })
+
+const closeEntry = async ($: Engine) => {
+  await $.state.set(ENTRY_FLOW, null)
+  await $.ui.close({ id: ENTRY_PANE })
+}
 
 /** Shows the List in the Pane with the view the person asked for. */
 const openBoard = async ($: Engine, view: Pick<BoardView, 'filter' | 'chips'>) => {
@@ -675,11 +685,12 @@ export const register: Register = on => {
   on('command.run', { command: 'deck' }, async ($, e) => {
     const args = e.args.trim()
     if (args === 'new') {
-      return { text: (await startNew($)) ? 'Started a new Map or Spec.' : 'Nothing started.' }
+      await startNew($)
+      return { text: 'Choose how to start the new requirement.' }
     }
     if (args === 'bug') {
       await startBug($)
-      return { text: 'Started a bug report.' }
+      return { text: 'Fill in the bug report.' }
     }
     await refresh($)
     await $.ui.open({ id: PANE, title: PANE_TITLE })
@@ -971,6 +982,116 @@ export const register: Register = on => {
             </Box>
           </Box>
         )}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: ENTRY_PANE }, async ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
+    const Input = 'Input' in elements ? elements.Input : undefined
+    const flow = (await $.state.get(ENTRY_FLOW)).value
+    if (!flow) return <Text dimColor>Nothing to start.</Text>
+    const repo = await repoName($)
+    const open = async (text: string, name: string) => {
+      await closeEntry($)
+      await openSession($, text, name, e.surface)
+    }
+
+    if (flow.step === 'choose') {
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          <Text bold>New Requirement</Text>
+          <Text dimColor>Tab or the arrows move between the cards, Enter picks one, Esc closes.</Text>
+          {ENTRY_CARDS.map(card => (
+            <Button
+              key={`entry:${card.kind}`}
+              label={card.name}
+              onPress={() => $.state.set(ENTRY_FLOW, { step: 'requirement', kind: card.kind, text: '' })}
+            >
+              <Text bold color={card.kind === 'explore' ? KIND_STYLES.map.color : KIND_STYLES.spec.color}>{card.name}</Text>
+              <Text>{`
+${card.blurb}`}</Text>
+              <Text dimColor>{`
+${card.chain}`}</Text>
+            </Button>
+          ))}
+        </Box>
+      )
+    }
+
+    if (flow.step === 'requirement') {
+      const card = ENTRY_CARDS.find(c => c.kind === flow.kind)!
+      const send = (text: string) => open(requirementPrompt(card.kind, repo, text), card.title)
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          <Text bold>{card.name}</Text>
+          <Text dimColor>What is the requirement? Enter opens a new session with it.</Text>
+          {Input ? (
+            <Input
+              key="requirement"
+              label="Requirement"
+              placeholder="Describe what you want"
+              value={flow.text}
+              rows={4}
+              autoFocus
+              submitLabel="start"
+              onInput={(value: string) => void $.state.set(ENTRY_FLOW, { ...flow, text: value })}
+              onSubmit={(value: string) => send(value)}
+            />
+          ) : (
+            <Button key="requirement-start" label="Start" onPress={() => send(flow.text)}>
+              <Text>Start the session</Text>
+            </Button>
+          )}
+          <Button key="entry-back" label="Back" onPress={() => $.state.set(ENTRY_FLOW, { step: 'choose' })}>
+            <Text dimColor>← Back</Text>
+          </Button>
+        </Box>
+      )
+    }
+
+    const FIELD_LABELS: Record<BugField, string> = {
+      actual: 'Actual',
+      expected: 'Expected',
+      reproduction: 'Reproduction',
+      environment: 'Environment',
+    }
+    const setField = async (field: BugField, value: string) => {
+      const current = (await $.state.get(ENTRY_FLOW)).value
+      if (current?.step === 'bug') await $.state.set(ENTRY_FLOW, { step: 'bug', fields: { ...current.fields, [field]: value } })
+    }
+    const file = async () => {
+      const current = (await $.state.get(ENTRY_FLOW)).value
+      if (current?.step !== 'bug') return
+      if (bugIsEmpty(current.fields)) {
+        await $.state.set(ENTRY_FLOW, { ...current, note: 'Fill in at least one field before filing.' })
+        return
+      }
+      await open(bugPrompt(repo, current.fields), 'New Bug')
+    }
+    return (
+      <Box flexDirection="column" rowGap="sm">
+        <Text bold color={KIND_STYLES.bug.color}>+ BUG</Text>
+        <Text dimColor>Actual, Expected, Reproduction and Environment. Esc closes.</Text>
+        {Input &&
+          BUG_FIELDS.map(field => (
+            <Input
+              key={`bug:${field}`}
+              label={FIELD_LABELS[field]}
+              placeholder={FIELD_LABELS[field]}
+              value={flow.fields[field]}
+              rows={field === 'reproduction' ? 3 : 2}
+              autoFocus={field === 'actual' ? true : undefined}
+              submitLabel="next"
+              onInput={(value: string) => setField(field, value)}
+              onSubmit={(value: string) => setField(field, value)}
+            />
+          ))}
+        {flow.note && <Text color={DSH.warn}>{flow.note}</Text>}
+        <Button key="bug-file" label="File bug" onPress={file}>
+          <Text color={bugIsEmpty(flow.fields) ? DSH.muted : KIND_STYLES.bug.color}>✱ File bug</Text>
+        </Button>
       </Box>
     )
   })

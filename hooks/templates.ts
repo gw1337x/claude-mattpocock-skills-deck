@@ -13,6 +13,12 @@ export const INVESTIGATE = `## Investigate (recommended: look before asking)
 - [ ] Only after the existing notes you found cannot answer this question, run one new /research pass per its skill rules; state in one sentence why they do not fit, then write the new note path back into the body.
 - [ ] Before asking, state in one sentence what you checked; ask the question itself in this template original question format.`
 
+/** [INV-NEW]: the Investigate block with its first bullet reading related material in the repo. */
+export const INVESTIGATE_NEW = INVESTIGATE.replace(
+  '- [ ] It is recommended to read this ticket body, its comments, and related in-repo material before asking.',
+  '- [ ] It is recommended to read related material in the repo (docs, code, related issues) before asking.',
+)
+
 export const TEMPLATES = {
   mapComplete: `/wayfinder
 {url}
@@ -273,6 +279,67 @@ ${TOOLS}`,
 - [ ] Map-level items (e.g. Destination/Fog adjustments) → still write them in the chosen place, and mark the item "map-level, migrate when the map is built"
 
 ${TOOLS}`,
+  newWayfinder: `/wayfinder
+Please handle a requirement (strictly follow the wayfinder skill rules).
+Repo (auto-filled from the current workspace): {repo}
+
+${INVESTIGATE_NEW}
+
+## Wrap-up
+
+${TOOLS}`,
+  newSpec: `/grill-with-docs
+Help me discuss a requirement (strictly follow the grill-with-docs skill rules).
+Repo (auto-filled from the current workspace): {repo}
+
+${INVESTIGATE_NEW}
+
+## Discussion wrap-up (the user runs the actions below manually; do not run them on their behalf)
+- [ ] Once the discussion is settled and the conclusion is aligned, remind the user to manually run /to-spec once to turn the conclusion into a spec issue.
+- [ ] After the spec issue is created, remind the user to manually run /to-tickets once to split the spec issue into implementation issues.
+
+${TOOLS}`,
+  newBugWayfinder: `/wayfinder
+Please help me file a new BUG ticket (follow the wayfinder skill rules).
+Repo: {repo}
+New tickets must carry the bug label; if not yet triaged, also carry needs-triage. On remote backends use native labels; on the local Markdown backend add a Labels line (e.g. Labels: bug, needs-triage).
+
+
+## Clarify
+- [ ] If you hold assumptions, settle them with the grilling skill — never assume; never re-ask what is given; if all four fields are empty, do NOT file — ask the reporter first; if the symptom is present but other fields are missing, file and label needs-info
+
+${INVESTIGATE}
+
+## Check for duplicates
+- [ ] Once "Actual" is filled in, scan every BUG ticket the tools can see: call deck_issue_list (state=open, labels=['bug'], limit=200) to take them all, then call it again (state=closed, labels=['bug'], limit=200) to take them all. Read the returned key, title, labels and updated time; do not look only at the first few.
+- [ ] These two calls are full scans; do not replace them with keyword search — the same problem can be described in completely different words, and keywords will miss it.
+- [ ] Open the body with deck_issue_get only when a title looks similar. If the tool says the list may be incomplete, keep that sentence.
+- [ ] When something looks similar, do not decide on your own: show the reporter up to 3 candidates (key, title, why it looks similar) and ask "are these the same problem"; wait for the answer before deciding.
+- [ ] The reporter confirms the same problem and the old ticket is still open: do NOT file a new ticket; comment on the old ticket with this report's symptom and reproduction steps; do not close the old ticket.
+- [ ] The reporter confirms the same problem but the old ticket is closed: treat it as a regression, file a new ticket, write "Regression of #key" into the body, and link the old ticket.
+- [ ] The reporter says it is not the same, or nothing matched: file a new ticket and write the candidates you looked at and the reporter's answer into the body.
+- [ ] The reporter is unsure: send the old ticket link for a look; if it is still undecidable, file and link the candidates, label needs-info.
+- [ ] The two scans and the duplicate-check record are prerequisites for filing: finish any missing step before filing; if the tool itself errors, write the error into the duplicate-check record and then file.
+
+## Duplicate check record
+- [ ] Always add a "## Duplicate check record" section to the new ticket body, even when nothing matched; fill it from the actual check, never fabricate.
+- [ ] Scanned: which states and labels you looked at, and how many tickets each returned; if the tool says the list may be incomplete, write that here.
+- [ ] Hits: candidate keys and titles; write "none" when nothing matched.
+- [ ] Reporter confirmed: what the reporter answered.
+- [ ] Conclusion: new ticket / linked to which old ticket / filed as a regression.
+
+## Self-check
+- [ ] Check every box with no gaps; duplicate-check record written into the body (or already commented on the old ticket); true state written before finishing
+
+${TOOLS}`,
+  newBugFields: `
+
+The four fields below are required; if all four are empty, do not file — ask the reporter to complete them first.
+
+Actual (symptom; impact):{actual}
+Expected (expectation; diff from actual):{expected}
+Reproduction (preconditions and scenario + numbered steps; flaky → frequency):{reproduction}
+Environment (OS version + software version + runtime):{environment}`,
   healthCheck: `## Health check (put orphaned open tickets where they belong)
 
 This health check covers **every open ticket in the whole repository** (it does not follow the current panel filters): find the orphaned ones, and hand me a suggestion list — act only after I nod.

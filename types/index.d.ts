@@ -80,6 +80,12 @@ export type BoardSnapshot = {
   error?: string
 }
 
+/** Where the New Requirement and +BUG Pane is: choosing a card, writing the requirement, or filling the bug fields. */
+export type EntryFlow =
+  | { step: 'choose' }
+  | { step: 'requirement'; kind: 'explore' | 'implementation'; text: string }
+  | { step: 'bug'; fields: Record<'actual' | 'expected' | 'reproduction' | 'environment', string>; note?: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'mattpocock-skills-deck': {
@@ -111,6 +117,8 @@ declare module 'claude-code' {
       personTitled: boolean
       /** True in a session the deck opened, until its first reported ticket gives it a [#n] title. */
       openedByDeck: boolean
+      /** The Entry Chooser or +BUG form in progress; absent or null means none is open. */
+      entryFlow: EntryFlow | null
       /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */
       suggestions: { items: Suggestion[]; at: number } | null
     }

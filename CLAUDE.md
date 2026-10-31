@@ -12,11 +12,11 @@ Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `
 
 Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
-<!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ### Typecheck
 
 CI runs `npx tsc -p tsconfig.ci.json` against a vendored type snapshot in `types/vendor/`. Refresh procedure in `docs/agents/typecheck.md`.
 
+<!-- claude-reflect: learned rules (saved from the band; edit freely) -->
 ### dsh reference
 
 The behaviour we match is the dsh plugin's source at `C:\Users\Jock\.dsh\profiles\desktop\node_modules\dsh-mattpocock-skills-deck`; its GitHub reads and writes are in `tracker/`. Our notes on it are in `.scratch/dsh-reference/`.

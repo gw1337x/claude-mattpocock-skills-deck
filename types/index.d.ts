@@ -1,5 +1,8 @@
 export type Backend = 'github' | 'markdown'
 
+/** How the repo's domain docs are laid out: one glossary for all, or one per subproject. */
+export type Layout = 'single' | 'multi'
+
 export type Kind =
   | 'map'
   | 'spec'
@@ -133,6 +136,8 @@ declare module 'claude-code' {
       openedByDeck: boolean
       /** The Entry Chooser or +BUG form in progress; absent or null means none is open. */
       entryFlow: EntryFlow | null
+      /** The Backend gate's picks while it is open; absent or null means it is closed. */
+      gateChoice: { backend: Backend; layout: Layout } | null
       /** What the last refresh changed or added, and when; the List flashes those rows. */
       flash: { changed: string[]; added: string[]; at: number } | null
       /** Extra pages of closed rows loaded under the Closed fold. */

@@ -1,7 +1,8 @@
 /**
- * A DSH md-v1 `.scratch/` tracker, keyed by repo-relative path. The `readings` feature is trimmed from a real
- * repo's files (hidden `DSH-*` header lines in either order, bold fields, no `# ` title on the Spec); the
- * `checkout` Map and the `loose` Bug follow the same shape.
+ * A DSH md-v1 `.scratch/` tracker, keyed by repo-relative path, made by hand to hold every ticket state the
+ * tests need (Ready, Blocked, Claimed, closed). The `readings` feature keeps the shape of real DSH files
+ * (hidden `DSH-*` header lines in either order, bold fields, no `# ` title on the Spec); the `checkout` Map and
+ * the `loose` Bug follow it. Files DSH really wrote, unchanged, are in `md-v1-copied.ts`.
  */
 export const MD_V1_TRACKER: Record<string, string> = {
   'docs/agents/issue-tracker.md': '# Issue tracker: Local Markdown\n\nIssues live in `.scratch/`.\n',

@@ -138,6 +138,8 @@ declare module 'claude-code' {
       entryFlow: EntryFlow | null
       /** The Backend gate's picks while it is open; absent or null means it is closed. */
       gateChoice: { backend: Backend; layout: Layout } | null
+      /** The switch modal's picks while it is open; absent or null means it is closed. */
+      switchChoice: { from: Backend; to: Backend; option: 'keep' | 'migrate' | 'clear'; prompt: string; checks: Check[] } | null
       /** What the last refresh changed or added, and when; the List flashes those rows. */
       flash: { changed: string[]; added: string[]; at: number } | null
       /** Extra pages of closed rows loaded under the Closed fold. */

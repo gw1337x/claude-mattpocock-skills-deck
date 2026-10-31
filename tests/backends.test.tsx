@@ -40,6 +40,9 @@ const everything = async (ui: Ui) =>
     ...(await ui.findAll({ type: 'Button' })),
   ].map(t => t.text ?? '')
 
+const mountSwitch = ($: Engine, surface: (typeof SURFACES)[number]) =>
+  $.ui.mount({ ...PANE, requestId: 'switch', surface }) as Promise<Ui>
+
 const serveBox = (on: On) => {
   const fills: string[] = []
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
@@ -249,10 +252,16 @@ for (const surface of SURFACES) {
     })
     serveFiles(on, { ...READABLE })
     const gh = serveGh(on)
+    serveBox(on)
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('ui.close', () => ({ value: undefined }))
     const ui = await mount($, surface)
     expect(await texts(ui)).toContain('Backend: Markdown')
 
     await ui.press({ key: 'switch-backend' })
+    const modal = await mountSwitch($, surface)
+    await modal.press({ key: 'switch-confirm' })
+    await modal.unmount()
     expect(await texts(ui)).toContain('Backend: GitHub')
     expect(gh.calls.some(c => c.startsWith('api graphql'))).toBe(true)
     expect([...stored.values()]).toContain('github')

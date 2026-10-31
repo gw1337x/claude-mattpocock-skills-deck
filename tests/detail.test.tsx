@@ -44,7 +44,7 @@ const serveBox = (on: On) => {
 }
 
 for (const surface of SURFACES) {
-  test(`the Map detail shows counts, progress and ordered children on ${surface}`, async ($, on) => {
+  test(`the Map detail shows counts, progress and children grouped Ready, Claimed, Closed on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const ui = await mount($, surface)
 
@@ -54,7 +54,7 @@ for (const surface of SURFACES) {
     expect(shown).toContain('Map: Checkout UX')
     expect(shown).toContain('3 tickets · 2 open · 1 closed')
     expect(shown).toContainEqual(expect.stringMatching(/33%$/))
-    const order = ['payment providers', 'card form', 'refund'].map(t => shown.findIndex(s => s.includes(t)))
+    const order = ['card form', 'refund', 'payment providers'].map(t => shown.findIndex(s => s.includes(t)))
     expect(order.every(i => i >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
     await ui.unmount()

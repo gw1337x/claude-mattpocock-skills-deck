@@ -1755,7 +1755,7 @@ ${card.chain}`}</Text>
         {closedCards.length > 0 && (
           <Box key="closed-fold" flexDirection="column" rowGap="sm" marginTop="md">
             <Button key="closed-toggle" label={`Closed ${fold.total}`} dimColor onPress={() => $.state.set(CLOSED_OPEN, !closedShown)}>
-              <Text>{`${closedShown ? '▾' : '▸'} Closed ${fold.total} (${closedShown ? fold.loaded : 0} loaded)`}</Text>
+              <Text>{`${closedShown ? '▾' : '▸'} Closed ${fold.total} (${fold.loaded} loaded)`}</Text>
             </Button>
             {closedShown && (
               <Box flexDirection="column" rowGap="sm">

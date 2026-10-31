@@ -132,7 +132,7 @@ for (const surface of SURFACES) {
     serveFiles(on, manyClosed())
     const ui = await mount($, surface)
 
-    expect(await texts(ui)).toContain('▸ Closed 25 (0 loaded)')
+    expect(await texts(ui)).toContain('▸ Closed 25 (20 loaded)')
     expect(await cardTexts(ui)).toHaveLength(0)
 
     await ui.press({ key: 'closed-toggle' })

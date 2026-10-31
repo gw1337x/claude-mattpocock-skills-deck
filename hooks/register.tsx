@@ -646,19 +646,19 @@ const GATE_PANE = 'gate'
 const guideFoldKey = async ($: Engine) => `guide-folded:${await repoKey($)}`
 const layoutKey = async ($: Engine) => `layout:${await repoKey($)}`
 
-/** The guide step whose banner the person folded in this workspace; null when none is. */
-const readGuideFolded = async ($: Engine): Promise<GuideStepId | null> => {
+/** The guide steps whose banners the person folded in this workspace. */
+const readGuideFolded = async ($: Engine): Promise<GuideStepId[]> => {
   try {
     const stored = await $.store.get(await guideFoldKey($))
-    return typeof stored === 'string' ? (stored as GuideStepId) : null
+    return Array.isArray(stored) ? (stored as GuideStepId[]) : []
   } catch {
-    return null
+    return []
   }
 }
 
 const foldGuide = async ($: Engine, step: GuideStepId) => {
   try {
-    await $.store.set(await guideFoldKey($), step)
+    await $.store.set(await guideFoldKey($), [...(await readGuideFolded($)), step])
   } catch {
     // Without a store the banner folds only until the next draw.
   }
@@ -861,7 +861,7 @@ export const register: Register = on => {
     // One banner at a time, the first unmet step; the person can fold it away for this workspace.
     const chosen = (await findBackend($))?.backend ?? null
     const guide = nextGuide(chosen, envChecks)
-    const guideShown = guide !== null && (await readGuideFolded($)) !== guide.step ? guide : null
+    const guideShown = guide !== null && !(await readGuideFolded($)).includes(guide.step) ? guide : null
     const guideAction = async (step: GuideStepId) => {
       const fixOf = (id: string) => envChecks?.find(check => check.id === id)?.fix ?? ''
       if (step === 'backend') return openGate($)

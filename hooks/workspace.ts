@@ -1,9 +1,8 @@
-import type { Backend } from '../types'
+import type { Backend, Layout } from '../types'
+
+export type { Layout }
 
 export const WORKSPACE_FILE = 'docs/agents/workspace.yaml'
-
-/** How the repo's domain docs are laid out: one glossary for all, or one per subproject. */
-export type Layout = 'single' | 'multi'
 
 export type Workspace = { backend: Backend | null; layout: Layout | null }
 

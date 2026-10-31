@@ -116,5 +116,5 @@ The modal that asks for GitHub or Markdown (GitHub marked Recommended) and the l
 _Avoid_: Backend picker, switch dialog
 
 **Layout**:
-Whether the repo keeps one glossary (`single`) or one per subproject (`multi`), recorded in `docs/agents/workspace.yaml`. Changing it on a set-up workspace fills DSH's `switchLayout`.
+Whether the repo keeps one glossary (`single`) or one per subproject (`multi`), recorded in `docs/agents/workspace.yaml`. Changing it on a set-up workspace fills DSH's `switchLayout`. DSH's prompts call the two "single-context" and "multi-context".
 _Avoid_: Context mode

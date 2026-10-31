@@ -251,7 +251,7 @@ const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
           reload: () => readDeck($, backend),
         }
       : {
-          gh: { run: ghRun($), now: () => new Date(readAt).toISOString() },
+          gh: { run: ghRun($), now: async () => new Date(await $.clock.now()).toISOString() },
           reload: () => readDeck($, backend),
         }),
     detail: async item => {

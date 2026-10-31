@@ -24,10 +24,10 @@ import {
   type CreateKind,
   type PlanChild,
 } from './deck-writes'
-import { GhError, canWriteGithub, ghJson, runGh, type Run } from './github-tracker'
+import { GhError, ghJson, runGh, type Run } from './github-tracker'
 import { ensureBody, withBody, withOriginalWords, withProgress } from './markdown-write'
 
-type Gh = { run: Run; now: () => string }
+type Gh = { run: Run; now: () => Promise<string> }
 
 const ghOf = (tracker: DeckTracker): Gh => {
   if (tracker.gh === undefined || tracker.reload === undefined) throw new DeckRefusal('This Backend cannot be written through gh.')
@@ -44,11 +44,29 @@ const guarded = async <T>(work: () => Promise<T>): Promise<T> => {
   }
 }
 
-/** Refuses before the first write when GitHub says the viewer can only read the repo. */
+const WRITE_PERMISSIONS = ['TRIAGE', 'WRITE', 'MAINTAIN', 'ADMIN']
+
+/** Refuses before the first write unless GitHub says the viewer can write; an unanswered check is not a yes. */
 const refuseReadOnly = async (gh: Gh) => {
-  if (!(await guarded(() => canWriteGithub(gh.run)))) {
+  let permission: string | undefined
+  try {
+    permission = ((await ghJson(gh.run, ['repo', 'view', '--json', 'viewerPermission'])) as { viewerPermission?: string }).viewerPermission
+  } catch (error) {
+    if (!(error instanceof GhError) || error.kind !== 'other') throw error
+  }
+  if (permission === undefined) {
+    throw new DeckRefusal('Could not tell whether the signed-in account can write to this GitHub repo, so nothing was changed. Open Checks to fix it.')
+  }
+  if (!WRITE_PERMISSIONS.includes(permission)) {
     throw new DeckRefusal('This GitHub repo is read-only for the signed-in account, so nothing was changed. Sign in with an account that can write, or pick another repo.')
   }
+}
+
+/** Creates the labels the repo lacks, so `gh issue create --label` cannot fail on them. */
+const ensureLabels = async (gh: Gh, wanted: string[]) => {
+  if (wanted.length === 0) return
+  const have = ((await ghJson(gh.run, ['label', 'list', '--json', 'name', '--limit', '500'])) as { name: string }[]).map(label => label.name.toLowerCase())
+  for (const name of new Set(wanted)) if (!have.includes(name.toLowerCase())) await runGh(gh.run, ['label', 'create', name])
 }
 
 const marker = (key: string) => `<!-- DSH-IDEMPOTENCY-KEY: ${key.replace(/-->/g, '-- >')} -->`
@@ -84,7 +102,7 @@ const removeBlocker = async (gh: Gh, child: number, blocker: number) => {
 
 /** The issues whose body starts an idempotency marker with this key (so also longer keys that begin with it), found through GitHub's search. */
 const withKey = async (gh: Gh, key: string): Promise<{ number: number; body: string }[]> => {
-  const found = (await ghJson(gh.run, ['issue', 'list', '--state', 'all', '--search', `${key} in:body`, '--json', 'number,body'])) as { number: number; body?: string }[]
+  const found = (await ghJson(gh.run, ['issue', 'list', '--state', 'all', '--search', `${key} in:body`, '--limit', '500', '--json', 'number,body'])) as { number: number; body?: string }[]
   return found.flatMap(issue => ((issue.body ?? '').includes(marker(key).slice(0, -4)) ? [{ number: issue.number, body: issue.body ?? '' }] : []))
 }
 
@@ -123,14 +141,16 @@ const labelsFor = (kind: CreateKind, given: string[], label: string | undefined)
 }
 
 /** `gh issue create` with the flags repeated per value; returns the new number. */
-const createIssue = async (gh: Gh, issue: { title: string; body: string; labels: string[]; assignees: string[] }): Promise<number> =>
-  createdNumber(
+const createIssue = async (gh: Gh, issue: { title: string; body: string; labels: string[]; assignees: string[] }): Promise<number> => {
+  await ensureLabels(gh, issue.labels)
+  return createdNumber(
     await runGh(gh.run, [
       'issue', 'create', '--title', issue.title, '--body', issue.body,
       ...issue.labels.flatMap(label => ['--label', label]),
       ...issue.assignees.flatMap(login => ['--assignee', login]),
     ]),
   )
+}
 
 export const githubIssueCreate = (tracker: DeckTracker, input: Record<string, unknown>) =>
   guarded(async () => {
@@ -233,7 +253,7 @@ export const githubIssuePatch = (tracker: DeckTracker, input: Record<string, unk
         changed.push('originalWords')
       }
       if (progress !== undefined) {
-        text = withProgress(text, progress.percent as number, typeof progress.note === 'string' ? progress.note : undefined, gh.now())
+        text = withProgress(text, progress.percent as number, typeof progress.note === 'string' ? progress.note : undefined, await gh.now())
         changed.push('progress')
       }
       refuseOversize(text)

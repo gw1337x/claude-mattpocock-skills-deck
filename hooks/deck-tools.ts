@@ -28,10 +28,10 @@ export type DeckTracker = {
   partial: boolean
   /** An item's body and its comments, oldest first. */
   detail: (item: BoardItem) => Promise<{ body: string; comments: string[] }>
-  /** Markdown only: where the write tools put files. GitHub has none, so its writes are refused. */
+  /** Markdown only: where the write tools put files. GitHub has none; its writes go through `gh`. */
   files?: DeckFiles
   /** GitHub only: how the write tools reach `gh`, and the clock they stamp Progress with (an ISO time). */
-  gh?: { run: Run; now: () => string }
+  gh?: { run: Run; now: () => Promise<string> }
   /** Reads the tracker again, to read a write back. */
   reload?: () => Promise<DeckTracker>
 }

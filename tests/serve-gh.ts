@@ -93,6 +93,7 @@ export const serveGh = (
     subIssues: Object.fromEntries(Object.entries(SUB_ISSUES).map(([key, value]) => [key, [...value]])),
     blockedBy: Object.fromEntries(Object.entries(BLOCKED_BY).map(([key, value]) => [key, [...value]])),
   }
+  const known = new Set(options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug'])
   const find = (number: number) => server.issues.find(each => each.number === number)
   const flags = (rest: string[], flag: string) => rest.flatMap((arg, i) => (arg === flag ? [rest[i + 1] ?? ''] : []))
   const byId = (id: number) => id - 1000
@@ -127,8 +128,11 @@ export const serveGh = (
       return reply('')
     }
     if (line.startsWith('label list')) {
-      const names = options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug']
-      return reply(JSON.stringify(names.map(name => ({ name }))))
+      return reply(JSON.stringify([...known].map(name => ({ name }))))
+    }
+    if (argv[1] === 'label' && argv[2] === 'create') {
+      known.add(argv[3] ?? '')
+      return reply('')
     }
     if (line.startsWith('pr list')) return reply(JSON.stringify(GITHUB_PRS))
     if (line.startsWith('issue list') && argv.includes('--search')) {

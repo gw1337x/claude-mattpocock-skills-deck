@@ -25,13 +25,13 @@ const serve = async (on: On, options: Parameters<typeof serveGh>[1] = {}): Promi
 }
 
 /** The gh calls that change something, in order. */
-const writes = (gh: GhServer): string[] => gh.calls.filter(line => /^(issue (create|edit|close|comment)|api --method)/.test(line))
+const writes = (gh: GhServer): string[] => gh.calls.filter(line => /^(issue (create|edit|close|comment)|api --method|label create)/.test(line))
 
 test('deck_issue_create makes an issue with its labels and assignees through gh issue create', async ($, on) => {
   const gh = await serve(on)
   const made = await call($, 'deck_issue_create', { title: 'Totals are wrong', kind: 'bug', body: 'Off by one.', labels: ['billing'], assignees: ['jock'] })
 
-  expect(writes(gh)).toEqual(['issue create --title Totals are wrong --body Off by one. --label billing --label bug --label needs-triage --assignee jock'])
+  expect(writes(gh)).toEqual(['label create billing', 'issue create --title Totals are wrong --body Off by one. --label billing --label bug --label needs-triage --assignee jock'])
   expect(made).toMatchObject({ created: true, key: '#9', title: 'Totals are wrong', kind: 'bug', assignees: ['jock'] })
   expect(made.labels).toEqual(['billing', 'bug', 'needs-triage'])
 })
@@ -47,6 +47,7 @@ test('a Map ticket becomes a native sub-issue of its Map and its blockers native
   })
 
   expect(writes(gh)).toEqual([
+    'label create wayfinder:research',
     expect.stringMatching(/^issue create --title Which tax rules apply\? .* --label wayfinder:research$/),
     'api --method POST repos/{owner}/{repo}/issues/1/sub_issues -F sub_issue_id=1009',
     'api --method POST repos/{owner}/{repo}/issues/9/dependencies/blocked_by -F issue_id=1002',
@@ -237,4 +238,35 @@ test("a gh failure while writing reaches the model as the call's error", async (
   await serve(on, { fail: 'rate-limit' })
 
   expect((await call($, 'deck_issue_create', { title: 'x', kind: 'issue' })).error).toMatch(/rate limit/i)
+})
+
+test('labels the repo lacks are created before the issue that carries them', async ($, on) => {
+  const gh = await serve(on)
+  await call($, 'deck_issue_create', { title: 'A Map', kind: 'map' })
+  await call($, 'deck_issue_create', { title: 'Another', kind: 'map' })
+
+  expect(writes(gh).filter(line => line.startsWith('label create'))).toEqual(['label create wayfinder:map'])
+  expect(gh.calls.indexOf('label create wayfinder:map')).toBeLessThan(gh.calls.findIndex(line => line.startsWith('issue create')))
+})
+
+test('an answer that does not say the account can write is not a yes', async ($, on) => {
+  const gh = await serve(on, { permission: 'NONE' })
+
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'issue' })).error).toMatch(/read-only/)
+  expect(writes(gh)).toEqual([])
+})
+
+test('a plan of 60 children resumes without making any twice', async ($, on) => {
+  const gh = await serve(on)
+  const plan = {
+    title: 'Big plan',
+    planId: 'plan-big',
+    children: Array.from({ length: 60 }, (_, i) => ({ key: `C${i}`, title: `Child ${i}`, label: 'wayfinder:task' })),
+  }
+  await call($, 'deck_map_plan_create', plan)
+  const again = await call($, 'deck_map_plan_create', plan)
+
+  expect(again).toMatchObject({ resumed: true, created: [] })
+  expect(again.alreadyThere).toHaveLength(60)
+  expect(gh.calls.filter(line => line.includes('--search')).every(line => line.includes('--limit 500'))).toBe(true)
 })

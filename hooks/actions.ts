@@ -82,6 +82,14 @@ export const actionFor = (item: BoardItem, overrides: Overrides = {}, note?: Not
   return { name: row.name, skill: row.skill, prompt: row.name === 'Execute' ? withWayfinder(text) : text }
 }
 
+/** The Execute prompt for a Ticket whatever its own Action is: what "Start #n" on a Map puts in the box. */
+export const executeAction = (item: BoardItem, overrides: Overrides = {}, note?: Note): Action => {
+  const override = overrides.execute
+  const values = valuesFor(item)
+  const text = override === undefined ? fill(TEMPLATES.wayfinder, values) : expandOverride(override, values, note)
+  return { name: 'Execute', skill: 'wayfinder', prompt: withWayfinder(text) }
+}
+
 /** Progress across a Container's child Tickets. */
 export type Progress = { total: number; open: number; closed: number; percent: number }
 

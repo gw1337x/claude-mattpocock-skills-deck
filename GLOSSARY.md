@@ -30,6 +30,12 @@ _Avoid_: Issue (except when naming the backend's own object), task card
 **Kind**:
 What a ticket or container is: map, spec, implementation ticket, research, prototype, grilling, task, bug or plain.
 
+**Layers passed**:
+How far a Map has got: Levels count from 0, and a Level is passed once every ticket on it, and on every lower Level, is closed. Shown as `n/t`.
+
+**Card wall**:
+A Map's child tickets as cards grouped Ready, Claimed, Blocked, Closed.
+
 **Blocked**:
 An open ticket that waits on another ticket that is still open or cannot be found.
 

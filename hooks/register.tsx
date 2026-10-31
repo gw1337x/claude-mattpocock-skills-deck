@@ -10,6 +10,7 @@ import {
   ENTRY_CARDS,
   CONTINUE_PROMPT,
   containerAction,
+  executeAction,
   CONSOLIDATE_PROMPT,
   fill,
   HANDOFF_NEW_PROMPT,
@@ -66,7 +67,8 @@ import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { blockersOf, changedRows, clampTitle, closedFold, COPIED_MS, commentsPage, flashOf, foldLabels, type Flash } from './rows'
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
-import { DSH } from './theme'
+import { DSH, PIXEL } from './theme'
+import { cardGroups, layersPassed, mapSections, sectionLabel, specSections, startTarget } from './container'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
 import { HANDOFF_DIR, newestHandoff } from './handoff'
 import { claim, newSessionLink, newTitle, stillOpen } from './session-opener'
@@ -200,6 +202,7 @@ const CLOSED_PAGES = { plugin: 'mattpocock-skills-deck', key: 'closedPages' } as
 const CLOSED_OPEN = { plugin: 'mattpocock-skills-deck', key: 'closedOpen' } as const
 const ROW_LABELS = { plugin: 'mattpocock-skills-deck', key: 'rowLabels' } as const
 const COPIED = { plugin: 'mattpocock-skills-deck', key: 'copied' } as const
+const SECTIONS_CLOSED = { plugin: 'mattpocock-skills-deck', key: 'sectionsClosed' } as const
 const COMMENT_PAGES = { plugin: 'mattpocock-skills-deck', key: 'commentPages' } as const
 const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
@@ -1577,14 +1580,108 @@ ${card.chain}`}</Text>
       const children = childrenOf(items, container.path)
         .sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity))
       const { total, open: openCount, closed: closedCount, percent } = progressOf(children)
+      const isMap = container.kind === 'map'
+      // The pixel skin is the desktop's; the terminal keeps theme neutrals and the same words.
+      const pixel = isMap && Svg !== undefined
+      let body = ''
+      let unreadable = false
+      try {
+        body = backend === 'github'
+          ? (await readGithubDetail(ghRun($), container.number ?? 0)).body
+          : readTicketDetail(await $.fs.read(container.path)).body
+      } catch {
+        unreadable = true
+      }
+      const sections = isMap ? mapSections(body) : specSections(body)
+      const closedSections = (await $.state.get(SECTIONS_CLOSED)).value ?? []
+      const toggleSection = (key: string) =>
+        $.state.set(SECTIONS_CLOSED, closedSections.includes(key) ? closedSections.filter(each => each !== key) : [...closedSections, key])
+      const { passed, total: layers } = layersPassed(children, derivedItems.levels)
+      const start = isMap ? startTarget(children, derivedItems) : undefined
+      const mark = copied !== null && copied.path === container.path && rowNow - copied.at < COPIED_MS ? (copied.ok ? '✓' : '×') : '⧉'
+      const accent = pixel ? PIXEL.map : KIND_STYLES[container.kind].color
+      const frame = pixel
+        ? { borderStyle: 'bold', borderColor: PIXEL.frame, backgroundColor: PIXEL.paper, padding: 'sm' as const }
+        : { borderStyle: 'round', borderColor: DSH.border, padding: 'sm' as const }
+      const ink = pixel ? PIXEL.ink : undefined
+      const groupColor = { Ready: PIXEL.ready, Claimed: PIXEL.claimed, Blocked: PIXEL.blocked, Closed: DSH.muted } as const
+      const wall = cardGroups(children, derivedItems).filter(group => group.items.length > 0)
       return (
-        <Box flexDirection="column">
-          <Button key="back" label="Back" onPress={() => showDetail(null)} />
-          <Text bold>{`${KIND_NAMES[container.kind]}: ${container.title}`}</Text>
-          <Text>{`${total} tickets · ${openCount} open · ${closedCount} closed`}</Text>
-          <Text>{progressBar(percent)}</Text>
-          <Box flexDirection="row" columnGap="xs">{renderAction(container, items)}{renderOpen(container, items)}</Box>
-          {children.map(child => renderCard(child, items, derivedItems))}
+        <Box flexDirection="column" rowGap="sm">
+          <Box flexDirection="row" alignItems="center" columnGap="xs" flexWrap="wrap">
+            <Button key="back" label="Back" onPress={() => showDetail(null)} />
+            <Button key={`copy:${container.path}`} label="Copy link" dimColor onPress={press => copyLink(container, press.surface)}>
+              <Text dimColor={mark === '⧉'} color={mark === '✓' ? DSH.ok : mark === '×' ? DSH.bad : undefined}>
+                {mark}
+              </Text>
+            </Button>
+            <Link href={container.url ?? container.path}>↗</Link>
+            {renderOpen(container, items)}
+          </Box>
+          <Box key="profile" flexDirection="column" rowGap="sm" {...frame}>
+            <Box flexDirection="row" alignItems="center" columnGap="md" flexWrap="wrap">
+              {isMap && progressMark(elements, Svg, passed, layers, accent)}
+              <Box flexDirection="column">
+                <Text bold color={ink}>{`${KIND_NAMES[container.kind]}: ${container.title}`}</Text>
+                <Text color={ink}>{`${total} tickets · ${openCount} open · ${closedCount} closed`}</Text>
+                <Text color={ink}>{progressBar(percent)}</Text>
+                {isMap && <Text color={ink}>{`${passed}/${layers} layers passed`}</Text>}
+              </Box>
+            </Box>
+            <Box flexDirection="row" alignItems="center" columnGap="xs" flexWrap="wrap">
+              {renderAction(container, items)}
+              {start && (
+                <Button
+                  key={`start:${container.path}`}
+                  label={`Start #${start.number}`}
+                  variant="primary"
+                  onPress={() => fillPrompt($, executeAction(start, overrides, debugNote).prompt, titleFor(start))}
+                />
+              )}
+            </Box>
+            {sections.map(section => {
+              const key = `${container.path}|${section.title}`
+              const collapsed = closedSections.includes(key)
+              return (
+                <Box key={`block:${section.title}`} flexDirection="column">
+                  <Button key={`section:${section.title}`} label={sectionLabel(section)} plain onPress={() => toggleSection(key)}>
+                    <Text bold color={ink}>{`${collapsed ? '▸' : '▾'} ${sectionLabel(section)}`}</Text>
+                  </Button>
+                  {!collapsed && (section.text === '' ? <Text dimColor>{unreadable ? 'Could not read this body.' : 'None'}</Text> : <Markdown text={section.text} />)}
+                </Box>
+              )
+            })}
+          </Box>
+          {isMap && (
+            <Box key="legend" flexDirection="row" columnGap="md" flexWrap="wrap">
+              {wall.length === 0 && <Text dimColor>No tickets yet</Text>}
+              {(['Ready', 'Claimed', 'Blocked', 'Closed'] as const).map(name => (
+                <Text key={`legend:${name}`} color={groupColor[name]} size="footnote">{`■ ${name}`}</Text>
+              ))}
+            </Box>
+          )}
+          {wall.map(group => (
+            <Box key={`group:${group.name}`} flexDirection="column" rowGap="xs">
+              <Text bold color={groupColor[group.name]}>{`${group.name} (${group.items.length})`}</Text>
+              {group.items.map(child => (
+                <Box
+                  key={`card:${child.path}`}
+                  flexDirection="row"
+                  alignItems="center"
+                  columnGap="sm"
+                  borderStyle={pixel ? 'bold' : 'round'}
+                  borderColor={pixel ? groupColor[group.name] : DSH.borderQuiet}
+                  padding="sm"
+                >
+                  <Text dimColor size="footnote">{numberText(child) ?? ''}</Text>
+                  <Button key={`detail:${child.path}`} label={child.title} plain onPress={() => showDetail(child.path)}>
+                    <Text weight="semibold" dimColor={group.name === 'Closed'}>{child.title}</Text>
+                  </Button>
+                  <Text color={groupColor[group.name]} size="footnote">{KIND_STYLES[child.kind].name}</Text>
+                </Box>
+              ))}
+            </Box>
+          ))}
         </Box>
       )
     }

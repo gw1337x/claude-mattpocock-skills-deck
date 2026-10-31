@@ -16,3 +16,5 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude plugin test .
       - run: claude plugin validate .
+      - run: npm install --no-save typescript@5
+      - run: npx tsc -p tsconfig.ci.json

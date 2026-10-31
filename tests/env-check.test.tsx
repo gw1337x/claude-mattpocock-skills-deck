@@ -57,6 +57,15 @@ const serveSkills = (on: On, names: string[]) => {
   }) as never)
 }
 
+const serveStore = (on: On) => {
+  const stored = new Map<string, unknown>()
+  on('store.get', (_, e) => ({ value: stored.get(e.key) }))
+  on('store.set', (_, e) => {
+    stored.set(e.key, e.value)
+    return { value: undefined }
+  })
+}
+
 const serveBox = (on: On) => {
   const fills: string[] = []
   on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
@@ -129,7 +138,8 @@ for (const surface of SURFACES) {
     expect(rowOf(shown, 'The workflow labels exist')).toMatch(/^✗/)
     await ui.press({ key: 'fix:gh-installed' })
     expect(fills).toHaveLength(1)
-    expect(fills[0]).toContain('GitHub CLI')
+    expect(fills[0]).toBe('/wizard help the user install the gh CLI — official page: https://cli.github.com/')
+    expect(await keys(ui)).toContain('recheck:gh-installed')
     await ui.unmount()
   })
 
@@ -147,7 +157,7 @@ for (const surface of SURFACES) {
     expect(rowOf(shown, 'gh is logged in')).toMatch(/^✗/)
     expect(rowOf(shown, 'A GitHub remote is present')).toMatch(/^✓/)
     await ui.press({ key: 'fix:gh-logged-in' })
-    expect(fills[0]).toContain('gh auth login')
+    expect(fills[0]).toContain('run gh auth login and finish browser authorization')
     await ui.unmount()
   })
 
@@ -168,6 +178,7 @@ for (const surface of SURFACES) {
   test(`missing workflow labels are named and the fix prompt lists them on ${surface}`, async ($, on) => {
     serveFiles(on, { ...markdownFiles(), ...GITHUB_DOCS })
     serveSkills(on, ALL_SKILLS)
+    serveStore(on)
     serveGh(on, { labels: ['needs-triage', 'bug'] })
     const fills = serveBox(on)
     const ui = await mount($, surface)
@@ -177,8 +188,13 @@ for (const surface of SURFACES) {
 
     expect(rowOf(shown, 'The workflow labels exist')).toContain('missing needs-info, ready-for-agent, ready-for-human, wontfix')
     await ui.press({ key: 'fix:github-labels' })
-    expect(fills[0]).toContain('needs-info, ready-for-agent, ready-for-human, wontfix')
+    expect(fills[0]).toContain('Required labels: needs-info, ready-for-agent, ready-for-human, wontfix')
     expect(fills[0]).not.toContain('needs-triage')
+    expect(fills[0]).toContain('Please complete the missing canonical labels (4 total)')
+
+    await ui.press({ key: 'skip:github-labels' })
+    expect(rowOf(await texts(ui), 'The workflow labels exist')).toBeUndefined()
+    expect(score(await texts(ui))).toBe('Checks 7/7')
     await ui.unmount()
   })
 
@@ -197,7 +213,8 @@ for (const surface of SURFACES) {
     expect(rowOf(shown, 'docs/agents/triage-labels.md')).toMatch(/^✓/)
     expect(score(shown)).toBe('Checks 3/4')
     await ui.press({ key: 'fix:doc:domain' })
-    expect(fills).toEqual(['/setup-matt-pocock-skills'])
+    expect(fills).toHaveLength(1)
+    expect(fills[0]).toContain('/setup-matt-pocock-skills\n\nBootstrap this repo configuration')
     await ui.unmount()
   })
 
@@ -240,7 +257,7 @@ for (const surface of SURFACES) {
     expect(await keys(ui)).toContain('run-setup')
     await ui.press({ key: 'run-setup' })
 
-    expect(fills).toEqual(['/setup-matt-pocock-skills'])
+    expect(fills[0]).toContain('/setup-matt-pocock-skills\n\nBootstrap this repo configuration')
     await ui.unmount()
   })
 
@@ -258,6 +275,22 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'recheck' })
 
     expect(score(await texts(ui))).toBe('Checks 4/4')
+    await ui.unmount()
+  })
+
+  test(`Capability diagnostics are collapsed until pressed, and a missing skill offers the suite install on ${surface}`, async ($, on) => {
+    serveFiles(on, markdownFiles())
+    serveSkills(on, ['wayfinder'])
+    const fills = serveBox(on)
+    const ui = await mount($, surface)
+
+    await ui.press({ key: 'tab:checks' })
+    expect((await texts(ui)).join('\n')).not.toContain('Installed skills read')
+    await ui.press({ key: 'diagnostics-toggle' })
+    expect((await texts(ui)).join('\n')).toContain('Installed skills read')
+
+    await ui.press({ key: 'fix:matt-skills' })
+    expect(fills[0]).toContain('Install the Matt Pocock skills collection')
     await ui.unmount()
   })
 }

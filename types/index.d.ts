@@ -57,6 +57,12 @@ export type Check = {
   detail?: string
   /** The prompt the failing row's button puts in the box. */
   fix: string
+  /** A page that helps with the failing row; its Open link button shows only then. */
+  link?: string
+  /** The row has a form to fill: Create and publish. */
+  form?: 'publish'
+  /** The row can be skipped (an incomplete label set). */
+  skippable?: boolean
 }
 
 /** One Suggestion pill, as the model passed it to suggest_next_steps. */
@@ -118,6 +124,8 @@ declare module 'claude-code' {
       skillDetail: string | null
       /** The Checks rows as last run; absent means the tab runs the checks when drawn. */
       envChecks: Check[] | null
+      /** True while the Checks tab's Capability diagnostics are expanded. */
+      diagnosticsOpen: boolean
       /** Why the last Palette save did not happen; absent or null shows nothing. */
       paletteNote: string | null
       /** True while the Capsule band's Skills menu is open. */

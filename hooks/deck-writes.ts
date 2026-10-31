@@ -16,10 +16,10 @@ import {
   type DeckTracker,
 } from './deck-tools'
 import {
-  STATUS_LABELS,
+  answerGist,
   applyPatch,
   bodyOf,
-  bodyWithWords,
+  ensureBody,
   hashOf,
   overLimit,
   padNumber,
@@ -27,6 +27,7 @@ import {
   renderFile,
   slugOf,
   withBlockers,
+  withDecisionPointer,
   withParent,
   type NewFile,
   type Patch,
@@ -36,8 +37,6 @@ const MAP_LABELS = ['wayfinder:research', 'wayfinder:prototype', 'wayfinder:gril
 const CREATE_KINDS = ['map', 'map-ticket', 'spec', 'spec-ticket', 'bug', 'issue'] as const
 type CreateKind = (typeof CREATE_KINDS)[number]
 const PLAN_KINDS = ['map-ticket', 'bug', 'issue'] as const
-/** Where a standalone bug or issue goes when the call names no effort or feature. */
-const LOOSE = 'loose'
 const PLAN_CHILD_LIMIT = 60
 
 const WORDS_SCHEMA = {
@@ -63,7 +62,7 @@ export const DECK_WRITE_TOOLS: DeckToolSpec[] = [
         body: { type: 'string', description: 'Markdown, at most 60KB.' },
         originalWords: WORDS_SCHEMA,
         label: { type: 'string', enum: MAP_LABELS, description: 'map-ticket only: what kind of ticket it is.' },
-        parentKey: { type: ['string', 'number'], description: "The Map or Spec the ticket belongs to." },
+        parentKey: { type: ['string', 'number'], description: 'The Map or Spec the ticket belongs to.' },
         blockedBy: { ...KEYS, description: 'Tickets in the same effort this one waits on.' },
         labels: { type: 'array', items: { type: 'string' } },
         assignees: { type: 'array', items: { type: 'string' } },
@@ -98,7 +97,7 @@ export const DECK_WRITE_TOOLS: DeckToolSpec[] = [
           additionalProperties: false,
         },
         close: { type: 'boolean', description: 'true closes the issue. false is refused: nothing reopens.' },
-        closeReason: { type: 'string', enum: ['completed', 'duplicate'], default: 'completed' },
+        closeReason: { type: 'string', description: 'With close: why it closed, in a sentence. It becomes the closing comment (a Map ticket: its Answer).' },
         workRouteDetail: WORK_ROUTE_DETAIL,
         ...SCOPE_SCHEMA,
       },
@@ -203,26 +202,31 @@ const refuseOversize = (body: string) => {
   if (overLimit(body)) throw new DeckRefusal('The body is over 60KB. Shorten it, or move the detail into a linked file.')
 }
 
-const unique = (labels: string[]): string[] => [...new Set(labels)]
-
-/** The nearest status label in a list, else the default. */
-const statusOf = (labels: string[], fallback: string): string => labels.find(label => STATUS_LABELS.includes(label)) ?? fallback
+/** Labels in the order given, then those the kind requires; a label already there is not added twice. */
+const withLabels = (given: string[], required: string[]): string[] => {
+  const labels = [...given]
+  for (const label of required) if (!labels.some(have => have.toLowerCase() === label.toLowerCase())) labels.push(label)
+  return labels
+}
 
 /** The next free ticket number in an effort. */
 const nextNumber = (tracker: DeckTracker, feature: string): number =>
   tracker.items.reduce((max, item) => (item.feature === feature && !isContainer(item) ? Math.max(max, item.number ?? 0) : max), 0) + 1
 
-const ticketPath = (feature: string, number: number, title: string) =>
-  `.scratch/${feature}/issues/${padNumber(number)}-${slugOf(title)}.md`
+const ticketPath = (feature: string, number: number, title: string) => `.scratch/${feature}/issues/${padNumber(number)}-${slugOf(title)}.md`
 
-/** The labels, status and parent a new ticket of this kind carries. */
-const ticketShape = (kind: 'map-ticket' | 'spec-ticket' | 'bug' | 'issue', label: string | undefined, labels: string[]) => {
-  if (label !== undefined && kind !== 'map-ticket') throw new DeckRefusal('label is for a map-ticket only.')
-  if (label !== undefined && !MAP_LABELS.includes(label)) throw new DeckRefusal(`label must be one of ${MAP_LABELS.join(', ')}.`)
-  const base =
-    kind === 'map-ticket' ? (label === undefined ? [] : [label]) : kind === 'spec-ticket' ? ['ready-for-agent'] : kind === 'bug' ? ['bug', 'needs-triage'] : ['needs-triage']
-  const all = unique([...base, ...labels])
-  return { labels: all, status: statusOf(all, kind === 'map-ticket' || kind === 'spec-ticket' ? 'ready-for-agent' : 'needs-triage') }
+/** The folders that hold a Map or Spec. */
+const efforts = (tracker: DeckTracker): string[] => [...new Set(tracker.items.filter(isContainer).map(item => item.feature))]
+
+/** A folder name for a new Map, Spec or loose ticket: the title's slug, then `-2`, `-3` while a folder has that name. */
+const freshFeature = (tracker: DeckTracker, title: string): string => {
+  const taken = new Set(tracker.items.map(item => item.feature))
+  const base = slugOf(title)
+  for (let n = 1; n <= 50; n++) {
+    const name = n === 1 ? base : `${base}-${n}`
+    if (!taken.has(name)) return name
+  }
+  throw new DeckRefusal(`The first 50 folder names for "${title}" are taken: pass effort or feature.`)
 }
 
 /** A blocker named by `07`, `#7`, 7 or `<effort>/07`, as a ticket number in the effort. */
@@ -258,6 +262,7 @@ const refuseCycle = (tracker: DeckTracker, feature: string, proposed: Map<number
   }
 }
 
+/** The Map or Spec a ticket of this kind hangs under: parentKey, else the effort named, else the only one there is. */
 const parentOfKind = (tracker: DeckTracker, input: Record<string, unknown>, kind: 'map' | 'spec'): BoardItem => {
   const scope = scopeOf(input)
   const raw = input.parentKey
@@ -266,8 +271,17 @@ const parentOfKind = (tracker: DeckTracker, input: Record<string, unknown>, kind
   let parent: BoardItem | undefined
   if (raw !== undefined && String(raw).trim() !== '') parent = findItem(tracker, { key: raw, ...(scope === null ? {} : { effort: scope }) })
   else if (scope !== null) parent = tracker.items.find(item => item.feature === scope && isContainer(item))
+  else {
+    const only = tracker.items.filter(item => item.kind === kind)
+    if (only.length === 1) parent = only[0]
+    else if (only.length > 1) {
+      throw new DeckRefusal(`There are ${only.length} ${want}s (${only.map(item => item.feature).join(', ')}): pass parentKey or ${kind === 'map' ? 'effort' : 'feature'}.`)
+    }
+  }
   if (parent === undefined) throw new DeckRefusal(`A ${ticket} needs a ${want} parent: pass parentKey${kind === 'map' ? ' (or effort)' : ' (or feature)'}.`)
-  if (parent.kind !== kind) throw new DeckRefusal(`A ${ticket} needs a ${want} parent, but ${keyOf(tracker.backend, parent)} is ${isContainer(parent) ? `a ${parent.kind === 'map' ? 'Map' : 'Spec'}` : 'a ticket'}.`)
+  if (parent.kind !== kind) {
+    throw new DeckRefusal(`A ${ticket} needs a ${want} parent, but ${keyOf(tracker.backend, parent)} is ${isContainer(parent) ? `a ${parent.kind === 'map' ? 'Map' : 'Spec'}` : 'a ticket'}.`)
+  }
   return parent
 }
 
@@ -288,16 +302,44 @@ const reread = async (tracker: DeckTracker, path: string, extra: Record<string, 
   return { ...extra, ...(await deckIssueGet(fresh, { key: path })) }
 }
 
+const wordsOf = (value: unknown): { text: string; source?: string } | undefined => {
+  const words = value as { text?: unknown; source?: unknown } | undefined
+  if (words === undefined) return undefined
+  if (typeof words.text !== 'string' || words.text.trim() === '') throw new DeckRefusal('originalWords.text is empty.')
+  return { text: words.text, source: typeof words.source === 'string' ? words.source : undefined }
+}
+
+/** The file for a new ticket of this kind, with the labels, parent and Type DSH gives it. */
+const ticketFile = (
+  kind: 'map-ticket' | 'spec-ticket' | 'bug' | 'issue',
+  fields: { title: string; number: number; body: string; label?: string; labels: string[]; assignees: string[]; blockedBy: number[]; parent: string | null; key: string; created: string },
+): NewFile => {
+  if (fields.label !== undefined && kind !== 'map-ticket') throw new DeckRefusal('label is for a map-ticket only.')
+  if (fields.label !== undefined && !MAP_LABELS.includes(fields.label)) throw new DeckRefusal(`label must be one of ${MAP_LABELS.join(', ')}.`)
+  if (kind === 'map-ticket' && fields.label === undefined) throw new DeckRefusal(`A map-ticket needs a label: one of ${MAP_LABELS.join(', ')}.`)
+  const required = kind === 'map-ticket' ? [fields.label!] : kind === 'spec-ticket' ? ['ready-for-agent'] : kind === 'bug' ? ['bug', 'needs-triage'] : []
+  return {
+    shape: kind === 'map-ticket' ? 'map-ticket' : 'impl-ticket',
+    title: fields.title,
+    number: fields.number,
+    body: ensureBody(fields.body, false),
+    labels: withLabels(fields.labels, required),
+    assignees: fields.assignees,
+    blockedBy: fields.blockedBy,
+    parent: fields.parent,
+    type: kind === 'map-ticket' ? fields.label!.replace(/^wayfinder:/, '') : undefined,
+    idempotencyKey: fields.key,
+    created: fields.created,
+  }
+}
+
 export const deckIssueCreate = async (tracker: DeckTracker, input: Record<string, unknown>) => {
   const files = filesOf(tracker)
   const title = requiredTitle(input.title)
   const kind = input.kind as CreateKind
   if (!CREATE_KINDS.includes(kind)) throw new DeckRefusal(`kind must be one of ${CREATE_KINDS.join(', ')}.`)
-  const words = input.originalWords as { text?: unknown; source?: unknown } | undefined
-  const body = bodyWithWords(
-    typeof input.body === 'string' ? input.body : '',
-    words === undefined || typeof words.text !== 'string' ? undefined : { text: words.text, source: typeof words.source === 'string' ? words.source : undefined },
-  )
+  const body = typeof input.body === 'string' ? input.body.trim() : ''
+  const words = wordsOf(input.originalWords)
   refuseOversize(body)
 
   const idempotencyKey = stringIn(input.idempotencyKey)
@@ -313,13 +355,22 @@ export const deckIssueCreate = async (tracker: DeckTracker, input: Record<string
   let path: string
   let file: NewFile
   if (kind === 'map' || kind === 'spec') {
-    const feature = scopeOf(input) ?? slugOf(title)
+    const feature = scopeOf(input) ?? freshFeature(tracker, title)
     path = `.scratch/${feature}/${kind}.md`
     if (tracker.items.some(item => item.feature === feature && isContainer(item)) || (await files.exists(path))) {
       throw new DeckRefusal(`.scratch/${feature} already has a Map or Spec. Pass another ${kind === 'map' ? 'effort' : 'feature'}.`)
     }
-    const all = unique(kind === 'map' ? ['wayfinder:map', ...labels] : ['ready-for-agent', ...labels])
-    file = { shape: kind, title, body, labels: all, assignees, blockedBy: [], parent: null, status: statusOf(all, 'ready-for-agent'), idempotencyKey: key, created }
+    file = {
+      shape: kind,
+      title,
+      body: ensureBody(body, kind === 'map'),
+      labels: withLabels(labels, kind === 'map' ? ['wayfinder:map'] : ['ready-for-agent']),
+      assignees,
+      blockedBy: [],
+      parent: null,
+      idempotencyKey: key,
+      created,
+    }
   } else {
     const parent =
       kind === 'map-ticket'
@@ -330,14 +381,18 @@ export const deckIssueCreate = async (tracker: DeckTracker, input: Record<string
             ? undefined
             : findItem(tracker, { key: input.parentKey, ...(scopeOf(input) === null ? {} : { effort: scopeOf(input) }) })
     if (parent !== undefined && !isContainer(parent)) throw new DeckRefusal(`${keyOf(tracker.backend, parent)} is a ticket, not a Map or Spec; a parent must be a Map or Spec.`)
-    const feature = parent?.feature ?? scopeOf(input) ?? LOOSE
-    const shape = ticketShape(kind, stringIn(input.label), labels)
+    const known = efforts(tracker)
+    // A loose ticket joins the only effort there is; with several, it starts a folder named for its title.
+    const feature = parent?.feature ?? scopeOf(input) ?? (known.length === 1 ? known[0]! : freshFeature(tracker, title))
     const blockers = Array.isArray(input.blockedBy) ? [...new Set(input.blockedBy.map(entry => blockerNumber(tracker, feature, entry)))] : []
     const number = nextNumber(tracker, feature)
     path = ticketPath(feature, number, title)
-    file = { shape: 'ticket', title, number, body, labels: shape.labels, assignees, blockedBy: blockers, parent: parent === undefined ? null : '00', status: shape.status, idempotencyKey: key, created }
+    file = ticketFile(kind, { title, number, body, label: stringIn(input.label), labels, assignees, blockedBy: blockers, parent: parent === undefined ? null : '00', key, created })
   }
-  await files.write(path, renderFile(file))
+  let text = renderFile(file)
+  if (words !== undefined) text = applyPatch(text, { originalWords: words }, kind === 'map' || kind === 'spec')
+  refuseOversize(`${body}${words?.text ?? ''}`)
+  await files.write(path, text)
   return reread(tracker, path, { created: true })
 }
 
@@ -353,8 +408,7 @@ export const deckIssuePatch = async (tracker: DeckTracker, input: Record<string,
 
   if (input.close === false) throw new DeckRefusal(`${key} cannot be reopened: the deck only closes.`)
   const close = input.close === true
-  const reason = input.closeReason === undefined ? 'completed' : input.closeReason
-  if (reason !== 'completed' && reason !== 'duplicate') throw new DeckRefusal('closeReason must be completed or duplicate.')
+  if (input.closeReason !== undefined && typeof input.closeReason !== 'string') throw new DeckRefusal('closeReason is a sentence of text.')
   if (input.closeReason !== undefined && !close) throw new DeckRefusal('closeReason goes with close: true.')
   const comment = stringIn(input.comment)
   if (close) {
@@ -384,19 +438,27 @@ export const deckIssuePatch = async (tracker: DeckTracker, input: Record<string,
     }
     patch.progress = { percent: progress.percent, note: typeof progress.note === 'string' ? progress.note : undefined, when: files.now() }
   }
-  const words = input.originalWords as { text?: unknown; source?: unknown } | undefined
-  if (words !== undefined) {
-    if (typeof words.text !== 'string' || words.text.trim() === '') throw new DeckRefusal('originalWords.text is empty.')
-    patch.originalWords = { text: words.text, source: typeof words.source === 'string' ? words.source : undefined }
-  }
-  if (close) patch.close = reason
+  const words = wordsOf(input.originalWords)
+  if (words !== undefined) patch.originalWords = words
+  if (close) patch.close = { reason: stringIn(input.closeReason), when: files.now() }
   if (Object.keys(patch).length === 0) throw new DeckRefusal(`Nothing to change on ${key}: pass a comment, labels, assignees, title, body, progress, originalWords or close.`)
 
   const before = await files.read(item.path)
   const after = applyPatch(before, patch, container)
   refuseOversize(bodyOf(after))
   await files.write(item.path, after)
-  return reread(tracker, item.path, { changed: Object.keys(patch).filter(field => field !== 'when') })
+  if (close && !container && /^##[ \t]+Question[ \t]*$/m.test(before)) await pointFromMap(tracker, files, item, after, stringIn(input.closeReason))
+  return reread(tracker, item.path, { changed: Object.keys(patch) })
+}
+
+/** A resolved Map ticket leaves a line in its Map's `## Decisions so far`, as DSH writes it. */
+const pointFromMap = async (tracker: DeckTracker, files: DeckFiles, item: BoardItem, text: string, reason: string | undefined) => {
+  const map = tracker.items.find(other => other.path === item.parent)
+  if (map === undefined) return
+  const fileName = item.path.split('/').pop() ?? ''
+  const title = item.title.replace(/^\d{1,3}:\s*/, '')
+  const next = withDecisionPointer(await files.read(map.path), fileName, title, answerGist(text) || reason || title)
+  await files.write(map.path, next)
 }
 
 type Edge = { key: unknown; parentKey?: unknown; blockedBy?: unknown }
@@ -458,7 +520,7 @@ export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<stri
   const title = requiredTitle(input.title)
   const mapBody = typeof input.body === 'string' ? input.body.trim() : ''
   refuseOversize(mapBody)
-  if (!Array.isArray(input.children) || input.children.length === 0) throw new DeckRefusal('Pass the Map\'s children.')
+  if (!Array.isArray(input.children) || input.children.length === 0) throw new DeckRefusal("Pass the Map's children.")
   if (input.children.length > PLAN_CHILD_LIMIT) throw new DeckRefusal(`A plan holds at most ${PLAN_CHILD_LIMIT} children; split it.`)
 
   const children: PlanChild[] = (input.children as Record<string, unknown>[]).map(raw => {
@@ -499,8 +561,16 @@ export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<stri
     if (blockers.get(start)!.some(walk)) throw new DeckRefusal(`The edges make ${start} wait on itself.`)
   }
 
-  const feature = scopeOf(input) ?? slugOf(title)
   const planId = stringIn(input.planId) ?? `plan-${hashOf(`${title}\n${children.map(child => `${child.key}:${child.title}`).join('\n')}`)}`
+  // A retry finds its own folder again: the first with this plan's Map in it, else the first free name.
+  let feature = scopeOf(input)
+  for (let n = 1; feature === null && n <= 50; n++) {
+    const name = n === 1 ? slugOf(title) : `${slugOf(title)}-${n}`
+    const holder = tracker.items.find(item => item.feature === name && isContainer(item))
+    if (holder === undefined && !tracker.items.some(item => item.feature === name)) feature = name
+    else if (holder !== undefined && readHeader(await files.read(holder.path), 'DSH-IDEMPOTENCY-KEY') === planId) feature = name
+  }
+  if (feature === null) throw new DeckRefusal(`The first 50 folder names for "${title}" are taken: pass effort.`)
   const mapPath = `.scratch/${feature}/map.md`
   const existingMap = tracker.items.find(item => item.feature === feature && isContainer(item))
   let resumed = false
@@ -525,10 +595,19 @@ export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<stri
   const created = files.now()
   const written: string[] = []
   if (existingMap === undefined) {
-    const labels = unique(['wayfinder:map', ...textsIn(input.labels)])
     await files.write(
       mapPath,
-      renderFile({ shape: 'map', title, body: mapBody, labels, assignees: [], blockedBy: [], parent: null, status: statusOf(labels, 'ready-for-agent'), idempotencyKey: planId, created }),
+      renderFile({
+        shape: 'map',
+        title,
+        body: ensureBody(mapBody, true),
+        labels: withLabels(textsIn(input.labels), ['wayfinder:map']),
+        assignees: [],
+        blockedBy: [],
+        parent: null,
+        idempotencyKey: planId,
+        created,
+      }),
     )
     written.push(`${feature}/00`)
   }
@@ -544,10 +623,22 @@ export const deckMapPlanCreate = async (tracker: DeckTracker, input: Record<stri
       skipped.push(`${feature}/${padNumber(number)}`)
       continue
     }
-    const shape = ticketShape(child.kind, child.label, child.labels)
     await files.write(
       ticketPath(feature, number, child.title),
-      renderFile({ shape: 'ticket', title: child.title, number, body: child.body, labels: shape.labels, assignees: child.assignees, blockedBy: wait, parent: '00', status: shape.status, idempotencyKey: `${planId}/${child.key}`, created }),
+      renderFile(
+        ticketFile(child.kind, {
+          title: child.title,
+          number,
+          body: child.body,
+          label: child.label,
+          labels: child.labels,
+          assignees: child.assignees,
+          blockedBy: wait,
+          parent: '00',
+          key: `${planId}/${child.key}`,
+          created,
+        }),
+      ),
     )
     written.push(`${feature}/${padNumber(number)}`)
   }

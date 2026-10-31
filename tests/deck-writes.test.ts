@@ -31,22 +31,22 @@ const turnComplete = ($: Engine) =>
   $.turn.complete({ answer: '', durationMs: 0, isAborted: false, turnId: 't1', reason: 'answer' })
 
 const header = (key: string, value: string) => `<!-- DSH-${key}: ${value} -->`
+const lines = (...parts: string[]) => `${parts.join('\n')}\n`
 
-test('deck_issue_create writes a Map in the md-v1 layout', async ($, on) => {
+// The layouts below are DSH's own, read from the dsh-mattpocock-skills-deck package's renderers
+// (tracker/rooms/markdown/create-render.js, map-render.js) and from tickets it wrote in a real repo.
+
+test('deck_issue_create writes a Map as DSH does: its five blocks, then an empty 进度', async ($, on) => {
   const files = await serve(on)
-  const made = await call($, 'deck_issue_create', {
-    title: 'Billing UX',
-    kind: 'map',
-    body: '## Notes\n\nSome notes.',
-    idempotencyKey: 'deck-aaaa-1',
-  })
+  const made = await call($, 'deck_issue_create', { title: 'Billing UX', kind: 'map', body: '## Notes\n\nSome notes.', idempotencyKey: 'deck-aaaa-1' })
 
   expect(made.created).toBe(true)
   expect(made.key).toBe('billing-ux/00')
   expect(files['.scratch/billing-ux/map.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('TITLE', 'Billing UX'),
+      header('STATUS', 'ready-for-agent'),
       header('LABELS', 'wayfinder:map'),
       header('IDEMPOTENCY-KEY', 'deck-aaaa-1'),
       header('CREATED', ISO),
@@ -55,7 +55,16 @@ test('deck_issue_create writes a Map in the md-v1 layout', async ($, on) => {
       '',
       'Some notes.',
       '',
-    ].join('\n'),
+      '## Destination',
+      '',
+      '## Decisions so far',
+      '',
+      '## Not yet specified',
+      '',
+      '## Out of scope',
+      '',
+      '## 进度',
+    ),
   )
 })
 
@@ -71,7 +80,7 @@ test('deck_issue_create writes a Spec, then a Spec ticket under it', async ($, o
   })
 
   expect(files['.scratch/invoices/spec.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('TITLE', 'Invoices'),
       header('STATUS', 'ready-for-agent'),
@@ -83,10 +92,11 @@ test('deck_issue_create writes a Spec, then a Spec ticket under it', async ($, o
       '',
       'No invoices.',
       '',
-    ].join('\n'),
+      '## 进度',
+    ),
   )
   expect(files['.scratch/invoices/issues/01-add-the-download-button.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('PARENT', '00'),
       header('LABELS', 'ready-for-agent'),
@@ -100,13 +110,14 @@ test('deck_issue_create writes a Spec, then a Spec ticket under it', async ($, o
       '',
       '**Status:** ready-for-agent',
       '',
-    ].join('\n'),
+      '## 进度',
+    ),
   )
   expect(ticket.key).toBe('invoices/01')
   expect(ticket.parent).toEqual({ key: 'invoices/00', title: 'Invoices' })
 })
 
-test('deck_issue_create writes a Map ticket, with its label, blockers and assignees, next in the effort', async ($, on) => {
+test('deck_issue_create writes a Map ticket as Type, Status and Blocked by lines over a ## Question', async ($, on) => {
   const files = await serve(on)
   const made = await call($, 'deck_issue_create', {
     title: 'Pick a payment form',
@@ -120,74 +131,104 @@ test('deck_issue_create writes a Map ticket, with its label, blockers and assign
 
   expect(made.key).toBe('checkout/03')
   expect(files['.scratch/checkout/issues/03-pick-a-payment-form.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('PARENT', '00'),
+      header('ASSIGNEES', 'sam'),
       header('LABELS', 'wayfinder:grilling'),
       header('BLOCKED-BY', '01'),
       header('IDEMPOTENCY-KEY', 'k3'),
       header('CREATED', ISO),
-      header('ASSIGNEES', 'sam'),
       '# 03: Pick a payment form',
       '',
-      '**Blocked by:** 01',
+      'Type: grilling',
       '',
-      '**Status:** ready-for-agent',
+      'Status: claimed',
       '',
-    ].join('\n'),
+      'Blocked by: 01',
+      '',
+      '## Question',
+      '',
+      '## 进度',
+    ),
   )
   expect(made.kind).toBe('grilling')
   expect(made.blockedBy).toEqual([expect.objectContaining({ key: 'checkout/01', state: 'closed' })])
 })
 
-test('deck_issue_create writes a bug and a plain issue as needs-triage, loose when they have no parent', async ($, on) => {
+test('deck_issue_create puts a loose bug in a folder named for its title, with the body as What to build', async ($, on) => {
   const files = await serve(on)
   const bug = await call($, 'deck_issue_create', { title: 'Totals are wrong', kind: 'bug', body: 'Actual: 3. Expected: 4.', idempotencyKey: 'k4' })
   const issue = await call($, 'deck_issue_create', { title: 'Rename the tab', kind: 'issue', idempotencyKey: 'k5', labels: ['ui'] })
 
-  expect(bug.key).toBe('loose/02')
+  expect(bug.key).toBe('totals-are-wrong/01')
   expect(bug.kind).toBe('bug')
-  expect(files['.scratch/loose/issues/02-totals-are-wrong.md']).toBe(
-    [
+  expect(files['.scratch/totals-are-wrong/issues/01-totals-are-wrong.md']).toBe(
+    lines(
       header('FORMAT', 'md-v1'),
       header('LABELS', 'bug, needs-triage'),
       header('IDEMPOTENCY-KEY', 'k4'),
       header('CREATED', ISO),
-      '# 02: Totals are wrong',
+      '# 01: Totals are wrong',
       '',
-      'Actual: 3. Expected: 4.',
+      '**What to build:** Actual: 3. Expected: 4.',
       '',
       '**Blocked by:** None (can start immediately)',
       '',
-      '**Status:** needs-triage',
+      '**Status:** ready-for-agent',
       '',
-    ].join('\n'),
+      '## 进度',
+    ),
   )
-  expect(issue.labels).toEqual(['needs-triage', 'ui'])
+  expect(issue.key).toBe('rename-the-tab/01')
+  expect(files['.scratch/rename-the-tab/issues/01-rename-the-tab.md']).toContain(header('LABELS', 'ui'))
+})
+
+test('deck_issue_create adds the required labels after the ones given', async ($, on) => {
+  const files = await serve(on)
+  await call($, 'deck_issue_create', { title: 'Odd one', kind: 'bug', labels: ['ui'], idempotencyKey: 'k6' })
+
+  expect(files['.scratch/odd-one/issues/01-odd-one.md']).toContain(header('LABELS', 'ui, bug, needs-triage'))
+})
+
+test('deck_issue_create joins the only effort there is with a loose ticket', async ($, on) => {
+  const files = await serve(on)
+  for (const path of Object.keys(files)) if (path.startsWith('.scratch/checkout/') || path.startsWith('.scratch/loose/')) delete files[path]
+  const made = await call($, 'deck_issue_create', { title: 'One more', kind: 'issue', idempotencyKey: 'k7' })
+
+  expect(made.key).toBe('readings/06')
+  expect(files['.scratch/readings/issues/06-one-more.md']).toBeDefined()
 })
 
 test('deck_issue_create refuses a Map ticket with no Map parent, and a Spec ticket with no Spec parent', async ($, on) => {
   const files = await serve(on)
+  // Two Maps and no way to tell which: pass none and it is refused.
+  files['.scratch/second/map.md'] = '<!-- DSH-FORMAT: md-v1 -->\n<!-- DSH-TITLE: Second -->\n\n## Notes\n'
   const before = { ...files }
 
-  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket' })).error).toMatch(/Map parent/)
-  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'spec-ticket' })).error).toMatch(/Spec parent/)
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket', label: 'wayfinder:task' })).error).toMatch(/2 Maps.*parentKey or effort/)
   // A parent of the wrong kind is no parent.
-  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket', parentKey: 'readings/00' })).error).toMatch(/Map parent.*Spec/)
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket', label: 'wayfinder:task', parentKey: 'readings/00' })).error).toMatch(/Map parent.*Spec/)
   expect((await call($, 'deck_issue_create', { title: 'x', kind: 'spec-ticket', parentKey: 'checkout/00' })).error).toMatch(/Spec parent.*Map/)
   expect(files).toEqual(before)
+
+  for (const path of Object.keys(files)) if (path.startsWith('.scratch/checkout/') || path.startsWith('.scratch/second/')) delete files[path]
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket', label: 'wayfinder:task' })).error).toMatch(/Map parent/)
+  for (const path of Object.keys(files)) if (path.startsWith('.scratch/readings/')) delete files[path]
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'spec-ticket' })).error).toMatch(/Spec parent/)
 })
 
-test('deck_issue_create refuses a body over 60KB and a blocker that is not in the effort', async ($, on) => {
+test('deck_issue_create refuses a Map ticket with no label, a body over 60KB and a blocker outside the effort', async ($, on) => {
   const files = await serve(on)
   const before = { ...files }
 
+  expect((await call($, 'deck_issue_create', { title: 'x', kind: 'map-ticket', parentKey: 'checkout/00' })).error).toMatch(/needs a label/)
   expect((await call($, 'deck_issue_create', { title: 'Big', kind: 'issue', body: 'x'.repeat(61 * 1024) })).error).toMatch(/60KB/)
-  expect((await call($, 'deck_issue_create', { title: 'Fine', kind: 'issue', body: 'x'.repeat(60 * 1024) })).created).toBe(true)
-  const stray = await call($, 'deck_issue_create', { title: 'Waits', kind: 'map-ticket', parentKey: 'checkout/00', blockedBy: ['readings/01'] })
+  const stray = await call($, 'deck_issue_create', { title: 'Waits', kind: 'map-ticket', label: 'wayfinder:task', parentKey: 'checkout/00', blockedBy: ['readings/01'] })
 
   expect(stray.error).toMatch(/own effort/)
-  expect(Object.keys(files).length).toBe(Object.keys(before).length + 1)
+  expect(files).toEqual(before)
+  expect((await call($, 'deck_issue_create', { title: 'Fine', kind: 'issue', body: 'x'.repeat(60 * 1024) })).created).toBe(true)
 })
 
 test('deck_issue_create with a known idempotencyKey returns the issue it already made', async ($, on) => {
@@ -198,22 +239,20 @@ test('deck_issue_create with a known idempotencyKey returns the issue it already
   expect(first.created).toBe(true)
   expect(again.created).toBe(false)
   expect(again.key).toBe(first.key)
-  expect(Object.keys(files).filter(path => path.includes('once'))).toHaveLength(1)
+  expect(Object.keys(files).filter(path => path.startsWith('.scratch/once'))).toHaveLength(1)
 })
 
-test('deck_issue_create records the maintainer\'s original words after the Purpose', async ($, on) => {
+test("deck_issue_create records the maintainer's original words after the 目的 section", async ($, on) => {
   const files = await serve(on)
   await call($, 'deck_issue_create', {
     title: 'Words',
     kind: 'issue',
-    body: '## Purpose\n\nWhy.\n\n## Scope\n\nWhat.',
+    body: '## 目的\n\nWhy.\n\n## Scope\n\nWhat.',
     originalWords: { text: 'Make it fast', source: 'chat' },
     idempotencyKey: 'w',
   })
 
-  expect(files['.scratch/loose/issues/02-words.md']).toContain(
-    "## Purpose\n\nWhy.\n\n## Maintainer's original words\n\n> Make it fast\nSource: chat\n\n## Scope\n\nWhat.",
-  )
+  expect(files['.scratch/words/issues/01-words.md']).toContain('## 目的\n\nWhy.\n\n## 维护者原话\n\n出处：chat\n> Make it fast\n\n## Scope\n\nWhat.')
 })
 
 test('deck_issue_patch comments, labels, assigns, retitles and rewrites the body of a ticket', async ($, on) => {
@@ -223,14 +262,13 @@ test('deck_issue_patch comments, labels, assigns, retitles and rewrites the body
     key: 'readings/05',
     comment: 'Looking at it.',
     addLabels: ['needs-info', 'ui'],
-    removeLabels: ['ready-for-agent'],
     assignees: ['jock'],
     title: 'Fix the docs table',
     body: '**What to build:** the table, corrected.',
   })
 
   expect(files[path]).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('LABELS', 'needs-info, ui'),
       header('ASSIGNEES', 'jock'),
@@ -240,17 +278,16 @@ test('deck_issue_patch comments, labels, assigns, retitles and rewrites the body
       '',
       '**Blocked by:** None (can start immediately)',
       '',
-      '**Status:** needs-info',
+      '**Status:** ready-for-agent',
       '',
       '## Comments',
       '',
       `### local — ${ISO}`,
       'Looking at it.',
-      '',
-    ].join('\n'),
+    ),
   )
   expect(patched.title).toBe('Fix the docs table')
-  expect(patched.labels).toEqual(['needs-info', 'ui'])
+  expect(patched.labels).toEqual(expect.arrayContaining(['needs-info', 'ui']))
   expect(patched.assignees).toEqual(['jock'])
   expect(patched.comments).toEqual(['Looking at it.'])
 })
@@ -263,21 +300,13 @@ test('deck_issue_patch clears the assignees with an empty list', async ($, on) =
   expect(patched.assignees).toEqual([])
 })
 
-test('deck_issue_patch adds Progress entries newest first', async ($, on) => {
+test('deck_issue_patch adds Progress entries newest first, under 进度', async ($, on) => {
   const files = await serve(on)
   const path = '.scratch/readings/issues/03-capacity.md'
   await call($, 'deck_issue_patch', { key: 'readings/03', progress: { percent: 30, note: 'Reader done' } })
   const patched = await call($, 'deck_issue_patch', { key: 'readings/03', progress: { percent: 60 } })
 
-  expect(files[path]).toContain(
-    `**Status:** ready-for-agent
-
-## 进度
-
-- 进度：60%（${PROGRESS_TIME}）
-- 进度：30%（${PROGRESS_TIME}）：Reader done
-`,
-  )
+  expect(files[path]).toContain(`**Status:** ready-for-agent\n\n## 进度\n\n- 进度：60%（${PROGRESS_TIME}）\n- 进度：30%（${PROGRESS_TIME}）：Reader done\n`)
   expect(patched.progress).toBe('In progress 60%')
   expect((await call($, 'deck_issue_patch', { key: 'readings/03', progress: { percent: 101 } })).error).toMatch(/0 to 100/)
 })
@@ -287,34 +316,57 @@ test('deck_issue_patch only adds to the original words, and a rewrite keeps them
   const path = '.scratch/readings/issues/05-docs.md'
   await call($, 'deck_issue_patch', { key: 'readings/05', originalWords: { text: 'First', source: 'a' } })
   await call($, 'deck_issue_patch', { key: 'readings/05', originalWords: { text: 'Second' } })
+  await call($, 'deck_issue_patch', { key: 'readings/05', originalWords: { text: 'First', source: 'a' } })
   await call($, 'deck_issue_patch', { key: 'readings/05', progress: { percent: 10 } })
-  await call($, 'deck_issue_patch', {
-    key: 'readings/05',
-    body: "New body.\n\n## Maintainer's original words\n\n> Replaced",
-  })
+  await call($, 'deck_issue_patch', { key: 'readings/05', body: 'New body.\n\n## 维护者原话\n\n> Replaced' })
 
   const text = files[path]!
   expect(text).toContain('New body.')
-  expect(text).toContain("## Maintainer's original words\n\n> First\nSource: a\n\n> Second")
+  expect(text).toContain('## 维护者原话\n\n出处：a\n> First\n\n出处：\n> Second')
+  expect(text.match(/> First/g)).toHaveLength(1)
   expect(text).toContain('- 进度：10%')
   expect(text).not.toContain('Replaced')
 })
 
-test('deck_issue_patch closes a ticket with a reason, and cannot reopen it', async ($, on) => {
+test('deck_issue_patch closes a ticket and cannot reopen it; the reason becomes a closing comment', async ($, on) => {
   const files = await serve(on)
   const closed = await call($, 'deck_issue_patch', { key: 'readings/05', close: true, comment: 'Shipped.' })
 
   expect(files['.scratch/readings/issues/05-docs.md']).toContain('**Status:** resolved')
   expect(closed.state).toBe('closed')
-  const duplicate = await call($, 'deck_issue_patch', { key: 'readings/03', close: true, closeReason: 'duplicate' })
-  expect(files['.scratch/readings/issues/03-capacity.md']).toContain('**Status:** closed')
-  expect(duplicate.state).toBe('closed')
+  const reasoned = await call($, 'deck_issue_patch', { key: 'readings/03', close: true, closeReason: 'Superseded by 05' })
+  expect(files['.scratch/readings/issues/03-capacity.md']).toContain('**Status:** resolved')
+  expect(reasoned.comments).toEqual(['Superseded by 05'])
 
   expect((await call($, 'deck_issue_patch', { key: 'readings/05', close: false })).error).toMatch(/reopen/)
   expect((await call($, 'deck_issue_patch', { key: 'readings/05', close: true })).error).toMatch(/already closed/)
+  expect((await call($, 'deck_issue_patch', { key: 'readings/05', closeReason: 'x' })).error).toMatch(/close: true/)
   // A label that says ready does not reopen a closed ticket.
   const relabelled = await call($, 'deck_issue_patch', { key: 'readings/05', addLabels: ['ready-for-agent'] })
   expect(relabelled.state).toBe('closed')
+})
+
+test('deck_issue_patch resolves a Map ticket with an Answer and a pointer in the Map', async ($, on) => {
+  const files = await serve(on)
+  files['.scratch/checkout/map.md'] += '\n## Decisions so far\n\n## Out of scope\n'
+  files['.scratch/checkout/issues/02-prototype-form.md'] = lines(
+    header('FORMAT', 'md-v1'),
+    header('PARENT', '00'),
+    header('LABELS', 'wayfinder:prototype'),
+    '# 02: Prototype the card form',
+    '',
+    'Type: prototype',
+    '',
+    '## Question',
+    '',
+    'Which form?',
+  )
+  const closed = await call($, 'deck_issue_patch', { key: 'checkout/02', close: true, closeReason: 'Use the hosted form.' })
+
+  expect(closed.state).toBe('closed')
+  expect(files['.scratch/checkout/issues/02-prototype-form.md']).toContain('Type: prototype\n\nStatus: resolved')
+  expect(files['.scratch/checkout/issues/02-prototype-form.md']).toContain('## Answer\n\nUse the hosted form.')
+  expect(files['.scratch/checkout/map.md']).toContain('## Decisions so far\n- [Prototype the card form](issues/02-prototype-form.md): Use the hosted form.\n')
 })
 
 test('deck_issue_patch refuses to close a Spec with open implementation tickets, or without a comment', async ($, on) => {
@@ -329,7 +381,7 @@ test('deck_issue_patch refuses to close a Spec with open implementation tickets,
   const closed = await call($, 'deck_issue_patch', { key: 'readings/00', close: true, comment: 'All shipped.' })
 
   expect(closed.state).toBe('closed')
-  expect(files['.scratch/readings/spec.md']).toContain(header('STATUS', 'resolved'))
+  expect(files['.scratch/readings/spec.md']).toContain(header('STATUS', 'closed'))
   expect(closed.comments).toEqual(['All shipped.'])
 })
 
@@ -350,23 +402,22 @@ test('deck_issue_patch retitles and relabels a Map through its header', async ($
   expect(files['.scratch/checkout/map.md']).toContain(header('LABELS', 'wayfinder:map, q4'))
 })
 
-test('deck_map_link replaces a ticket\'s Blocked-by list and reads it back', async ($, on) => {
+test("deck_map_link replaces a ticket's Blocked-by list, writing #-keys in the visible line, and reads it back", async ($, on) => {
   const files = await serve(on)
   const linked = await call($, 'deck_map_link', { key: 'readings/05', blockedBy: ['readings/03', '04'] })
 
   expect(files['.scratch/readings/issues/05-docs.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('BLOCKED-BY', '03, 04'),
       '# 05: The docs stop teaching the bug',
       '',
       '**What to build:** correct the table.',
       '',
-      '**Blocked by:** 03, 04',
+      '**Blocked by:** #03, #04',
       '',
       '**Status:** ready-for-agent',
-      '',
-    ].join('\n'),
+    ),
   )
   expect(linked.blockedBy.map((edge: { key: string }) => edge.key)).toEqual(['readings/03', 'readings/04'])
   expect(linked.status).toBe('blocked')
@@ -386,8 +437,18 @@ test('deck_map_link adds a missing Blocked by line before the Status, and links 
   })
 
   expect(linked.items).toHaveLength(2)
-  expect(files['.scratch/checkout/issues/02-prototype-form.md']).toContain('**Blocked by:** 01\n\n**Status:** ready-for-agent')
+  expect(files['.scratch/checkout/issues/02-prototype-form.md']).toContain('**Blocked by:** #01\n\n**Status:** ready-for-agent')
   expect(files['.scratch/checkout/issues/01-research-payments.md']).toContain('**Blocked by:** None (can start immediately)\n\n**Status:** resolved')
+})
+
+test("deck_map_link writes a Map ticket's blockers as a bare line", async ($, on) => {
+  const files = await serve(on)
+  await call($, 'deck_issue_create', { title: 'Third', kind: 'map-ticket', label: 'wayfinder:task', parentKey: 'checkout/00', idempotencyKey: 'm3' })
+  await call($, 'deck_map_link', { key: 'checkout/03', blockedBy: ['01', '02'] })
+
+  expect(files['.scratch/checkout/issues/03-third.md']).toContain('Type: task\n\nBlocked by: 01, 02\n## Question')
+  await call($, 'deck_map_link', { key: 'checkout/03', blockedBy: [] })
+  expect(files['.scratch/checkout/issues/03-third.md']).not.toContain('Blocked by')
 })
 
 test('deck_map_link refuses a self-block, a cycle, a stranger and a move to another parent, writing nothing', async ($, on) => {
@@ -425,9 +486,10 @@ test('deck_map_plan_create builds a Map, its children and its edges in one call'
   expect(plan.created).toEqual(['search-ux/00', 'search-ux/01', 'search-ux/02', 'search-ux/03'])
   expect(plan.keys).toEqual({ D1: 'search-ux/01', D2: 'search-ux/02', D3: 'search-ux/03' })
   expect(files['.scratch/search-ux/map.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('TITLE', 'Search UX'),
+      header('STATUS', 'ready-for-agent'),
       header('LABELS', 'wayfinder:map'),
       header('IDEMPOTENCY-KEY', 'plan-1'),
       header('CREATED', ISO),
@@ -436,10 +498,19 @@ test('deck_map_plan_create builds a Map, its children and its edges in one call'
       '',
       'Notes.',
       '',
-    ].join('\n'),
+      '## Destination',
+      '',
+      '## Decisions so far',
+      '',
+      '## Not yet specified',
+      '',
+      '## Out of scope',
+      '',
+      '## 进度',
+    ),
   )
   expect(files['.scratch/search-ux/issues/02-prototype-the-box.md']).toBe(
-    [
+    lines(
       header('FORMAT', 'md-v1'),
       header('PARENT', '00'),
       header('LABELS', 'wayfinder:prototype'),
@@ -448,13 +519,16 @@ test('deck_map_plan_create builds a Map, its children and its edges in one call'
       header('CREATED', ISO),
       '# 02: Prototype the box',
       '',
+      'Type: prototype',
+      '',
+      'Blocked by: 01',
+      '',
+      '## Question',
+      '',
       'Try it.',
       '',
-      '**Blocked by:** 01',
-      '',
-      '**Status:** ready-for-agent',
-      '',
-    ].join('\n'),
+      '## 进度',
+    ),
   )
   expect(files['.scratch/search-ux/issues/03-typeahead-lags.md']).toContain(header('LABELS', 'bug, needs-triage'))
   expect(files['.scratch/search-ux/issues/03-typeahead-lags.md']).toContain(header('BLOCKED-BY', '02'))
@@ -474,7 +548,7 @@ test('deck_map_plan_create resumes: a repeat creates nothing twice, and finishes
   expect(resumed.alreadyThere).toEqual(['search-ux/01'])
   const again = await call($, 'deck_map_plan_create', PLAN)
   expect(again.created).toEqual([])
-  expect(Object.keys(files).filter(path => path.startsWith('.scratch/search-ux/'))).toHaveLength(4)
+  expect(Object.keys(files).filter(path => path.startsWith('.scratch/search-ux'))).toHaveLength(4)
 })
 
 test('deck_map_plan_create gives the same plan the same id when none is passed', async ($, on) => {
@@ -485,7 +559,7 @@ test('deck_map_plan_create gives the same plan the same id when none is passed',
 
   expect(second.planId).toBe(first.planId)
   expect(second.resumed).toBe(true)
-  expect(Object.keys(files).filter(path => path.startsWith('.scratch/search-ux/'))).toHaveLength(4)
+  expect(Object.keys(files).filter(path => path.startsWith('.scratch/search-ux'))).toHaveLength(4)
 })
 
 test('deck_map_plan_create refuses a bad edge, a cycle, an effort taken by another plan, and too many children', async ($, on) => {
@@ -546,7 +620,7 @@ test('a workspace with no Backend refuses the write tools like the read ones', a
 })
 
 /** A ticket DSH wrote in a real repo: fields mid-body, assignees after CREATED, Comments ahead of the Chinese 进度 section. */
-const DSH_TICKET = [
+const DSH_TICKET = lines(
   '<!-- DSH-FORMAT: md-v1 -->',
   '<!-- DSH-PARENT: 00 -->',
   '<!-- DSH-LABELS: ready-for-agent -->',
@@ -572,8 +646,7 @@ const DSH_TICKET = [
   '## 进度',
   '',
   '- 进度：100%（2026-10-28T19:27:07+00:00）：Chrome read from the loadout',
-  '',
-].join('\n')
+)
 
 test('a ticket DSH wrote keeps its layout: a comment lands in Comments, a Progress entry on top of 进度', async ($, on) => {
   const path = '.scratch/netrunner/issues/04-chrome.md'

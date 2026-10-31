@@ -132,3 +132,41 @@ export const LAYOUT_OPTIONS: { id: Layout; name: string }[] = [
 ]
 
 export const LAYOUT_QUESTION = 'Do the parts of this repo share one glossary, or does each keep its own?'
+
+export type SwitchOptionId = 'keep' | 'migrate' | 'clear'
+
+/** DSH's three ways to leave the old Backend's issues; only Keep can be chosen. */
+export const SWITCH_OPTIONS: { id: SwitchOptionId; name: string; description: string; locked: boolean }[] = [
+  {
+    id: 'keep',
+    name: 'Keep (recommended)',
+    description: 'Only changes what the deck points at, then re-reads the board. No risk, and you can switch back any time.',
+    locked: false,
+  },
+  {
+    id: 'migrate',
+    name: 'Migrate',
+    description: 'Best-effort copy of the issues to the new Backend (batches of 20, with a mapping). Lossy; description only, the source is left untouched.',
+    locked: false,
+  },
+  {
+    id: 'clear',
+    name: 'Clear',
+    description: 'Clears the current view (GitHub closes in bulk, Markdown deletes files). Irreversible. Not built yet, so it cannot be pressed.',
+    locked: true,
+  },
+]
+
+/** DSH's `DEFAULT_SWITCH_PROMPT_ZH`, in English (its `switch.promptHint`). */
+export const DEFAULT_SWITCH_PROMPT = 'Existing issues stay in the original backend, invisible after switching, visible when switching back.'
+
+export const SWITCH_PENDING = 'Switch backend · unavailable while detecting'
+
+/** DSH's switchAlign: the prompt that aligns the repo's records with the Backend the person switched to. */
+export const switchAlign = (from: Backend, to: Backend, layout: Layout): string => `/setup-matt-pocock-skills
+
+The issue-tracker backend for this workspace was confirmed in the panel as "${BACKEND_NAMES[to]}" (previously "${BACKEND_NAMES[from]}").
+
+Fill the gaps, keep the rest: of the three outputs below (docs/agents/issue-tracker.md, triage-labels.md, domain.md), create whichever is missing from the skill own templates; leave what already exists as it is — only align the lines that record the backend to "${BACKEND_NAMES[to]}", never rewrite content the user has edited, and never re-ask what is already answered above. If those three records already agree with "${BACKEND_NAMES[to]}" and all three outputs exist, there is nothing to change this time — reply with one line saying it is already consistent and stop: do not rewrite any file, do not re-run the flow.
+
+${setupRun(to, layout).replace(/^\/setup-matt-pocock-skills\n\n/, '')}`

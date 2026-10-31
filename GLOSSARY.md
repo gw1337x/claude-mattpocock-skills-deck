@@ -115,6 +115,10 @@ _Avoid_: Setup bar, wizard
 The modal that asks for GitHub or Markdown (GitHub marked Recommended) and the layout, then fills DSH's `setupRun` for them.
 _Avoid_: Backend picker, switch dialog
 
+**Switch modal**:
+Opened by Switch backend in the List header. Offers Keep (preselected, recommended), Migrate (description only) and Clear (locked), an editable prompt that defaults to DSH's text in English, and a preflight of the target Backend's prerequisites. Confirm binds the target and fills DSH's `switchAlign` with the from and to Backends. Unavailable, with the reason shown, while no Backend is detected.
+_Avoid_: Backend gate (that is the first-time picker)
+
 **Layout**:
 Whether the repo keeps one glossary (`single`) or one per subproject (`multi`), recorded in `docs/agents/workspace.yaml`. Changing it on a set-up workspace fills DSH's `switchLayout`. DSH's prompts call the two "single-context" and "multi-context".
 _Avoid_: Context mode

@@ -63,6 +63,7 @@ import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE, type Layout } from './workspace'
 import {
   CLI_INSTALL,
+  DEFAULT_SWITCH_PROMPT,
   GATE_BACKENDS,
   GH_AUTH_LOGIN,
   installSkills,
@@ -70,8 +71,12 @@ import {
   LAYOUT_QUESTION,
   nextGuide,
   setupRun,
+  SWITCH_OPTIONS,
+  SWITCH_PENDING,
+  switchAlign,
   switchLayout,
   type GuideStepId,
+  type SwitchOptionId,
 } from './setup'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
@@ -218,6 +223,7 @@ const SECTIONS_CLOSED = { plugin: 'mattpocock-skills-deck', key: 'sectionsClosed
 const COMMENT_PAGES = { plugin: 'mattpocock-skills-deck', key: 'commentPages' } as const
 const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
 const GATE_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'gateChoice' } as const
+const SWITCH_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'switchChoice' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -690,6 +696,24 @@ const saveLayout = async ($: Engine, layout: Layout) => {
 const openGate = async ($: Engine) => {
   await $.state.set(GATE_CHOICE, { backend: 'github', layout: await readLayout($) })
   await $.ui.open({ id: GATE_PANE, title: 'Select a backend', focus: true, closeOnEscape: true })
+}
+
+const SWITCH_PANE = 'switch'
+
+/** The Backend a switch goes to: there are two. */
+const otherBackend = (backend: Backend): Backend => (backend === 'github' ? 'markdown' : 'github')
+
+/** Opens the switch modal in its own focused Pane, with Keep chosen and the target's prerequisites checked. */
+const openSwitch = async ($: Engine, from: Backend) => {
+  const to = otherBackend(from)
+  const checks = (await runEnvChecks($, to).catch(() => [])).filter(check => /^(gh|github)-/.test(check.id))
+  await $.state.set(SWITCH_CHOICE, { from, to, option: 'keep', prompt: DEFAULT_SWITCH_PROMPT, checks })
+  await $.ui.open({ id: SWITCH_PANE, title: 'Switch backend', focus: true, closeOnEscape: true })
+}
+
+const closeSwitch = async ($: Engine) => {
+  await $.state.set(SWITCH_CHOICE, null)
+  await $.ui.close({ id: SWITCH_PANE })
 }
 
 const closeGate = async ($: Engine) => {
@@ -1301,6 +1325,73 @@ ${card.chain}`}</Text>
     )
   })
 
+  on('ui.render', { component: 'Pane', requestId: SWITCH_PANE }, async ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
+    const Input = 'Input' in elements ? elements.Input : undefined
+    const choice = (await $.state.get(SWITCH_CHOICE)).value
+    if (!choice) return <Text dimColor>Nothing to switch.</Text>
+    const colorOf = (backend: Backend) => (backend === 'github' ? BLUE : GREEN)
+    return (
+      <Box flexDirection="column" rowGap="sm">
+        <Text weight="semibold">Switch backend</Text>
+        <Box flexDirection="row" columnGap="xs">
+          <Text color={colorOf(choice.from)}>{BACKEND_NAMES[choice.from]}</Text>
+          <Text dimColor>→</Text>
+          <Text color={colorOf(choice.to)}>{BACKEND_NAMES[choice.to]}</Text>
+        </Box>
+        {SWITCH_OPTIONS.map(each => (
+          <Box key={`switch-row:${each.id}`} flexDirection="column">
+            <Button
+              key={`switch:${each.id}`}
+              label={each.name}
+              onPress={() => (each.locked ? $.ui.toast('Clear is not built yet, so it cannot be chosen.') : $.state.set(SWITCH_CHOICE, { ...choice, option: each.id }))}
+            >
+              <Text dimColor={each.locked} weight={choice.option === each.id ? 'semibold' : undefined}>
+                {`${each.locked ? '🔒' : choice.option === each.id ? '●' : '○'} ${each.name}`}
+              </Text>
+            </Button>
+            <Text dimColor size="footnote">{each.description}</Text>
+          </Box>
+        ))}
+        <Text dimColor size="footnote">Prompt (editable). Default: {DEFAULT_SWITCH_PROMPT}</Text>
+        {Input ? (
+          <Input
+            key="switch-prompt"
+            label="Prompt"
+            value={choice.prompt}
+            rows={2}
+            submitLabel="keep"
+            onInput={(value: string) => void $.state.set(SWITCH_CHOICE, { ...choice, prompt: value })}
+            onSubmit={(value: string) => $.state.set(SWITCH_CHOICE, { ...choice, prompt: value })}
+          />
+        ) : (
+          <Text>{choice.prompt}</Text>
+        )}
+        <Text dimColor size="footnote">Prerequisites for {BACKEND_NAMES[choice.to]}</Text>
+        {choice.checks.length === 0 && <Text color={GREEN}>✓ None needed</Text>}
+        {choice.checks.map(check => (
+          <Text key={`switch-check:${check.id}`} color={check.ok ? GREEN : AMBER}>{`${check.ok ? '✓' : '✗'} ${check.label}`}</Text>
+        ))}
+        <Box flexDirection="row" columnGap="sm">
+          <Button key="switch-cancel" label="Cancel" onPress={() => closeSwitch($)} />
+          <Button
+            key="switch-confirm"
+            label="Confirm"
+            variant="primary"
+            onPress={async () => {
+              await $.store.set(await overrideKey($), choice.to)
+              await $.state.set(DETAIL, null)
+              await closeSwitch($)
+              await refresh($)
+              await fillPrompt($, switchAlign(choice.from, choice.to, await readLayout($)))
+            }}
+          />
+        </Box>
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Link, Markdown, Text } = elements
@@ -1468,12 +1559,6 @@ ${card.chain}`}</Text>
       await $.state.set(COMMENT_PAGES, { path: item.path, pages: Number.MAX_SAFE_INTEGER })
       await refresh($)
     }
-    const switchBackend = async (chosen: Backend) => {
-      await $.store.set(await overrideKey($), chosen)
-      await $.state.set(DETAIL, null)
-      await refresh($)
-    }
-
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
     const recheck = async () => $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
     const TABS: ['list' | 'skills' | 'prs' | 'checks', string, string][] = [
@@ -1485,6 +1570,7 @@ ${card.chain}`}</Text>
     // Wide panes name their tabs; narrow ones keep the icon, and the longest names fold first.
     const columns = e.props.bodyColumns
     const tabWords = (name: string) => (columns >= 90 ? true : columns >= 64 ? name.length <= 6 : false)
+    const detecting = (await findBackend($)) === null
     const backendColor = backend === 'github' ? DSH.link : DSH.ok
     const repo = await repoName($)
     const root = await workspaceRoot($)
@@ -1508,9 +1594,16 @@ ${card.chain}`}</Text>
           )}
           <Text dimColor size="footnote">Backend: {BACKEND_NAMES[backend]}</Text>
           <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
-            <Button key="switch-backend" label="Switch backend" dimColor onPress={() => switchBackend(backend === 'github' ? 'markdown' : 'github')}>
-              ⇄
-            </Button>
+            {detecting ? (
+              <Box flexDirection="row" alignItems="center" columnGap="xs">
+                <Text dimColor>⇄</Text>
+                <Text key="switch-backend-reason" color={AMBER} size="footnote">{SWITCH_PENDING}</Text>
+              </Box>
+            ) : (
+              <Button key="switch-backend" label="Switch backend" dimColor onPress={() => openSwitch($, backend)}>
+                ⇄
+              </Button>
+            )}
             <Button key="palette" label="Palette" dimColor onPress={() => $.state.set(TAB, 'palette')}>
               ◐
             </Button>

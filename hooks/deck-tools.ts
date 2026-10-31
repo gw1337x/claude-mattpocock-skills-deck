@@ -2,6 +2,7 @@ import type { Backend, BoardItem } from '../types'
 import { BACKEND_NAMES } from './backend'
 import { statusOf } from './board-ui'
 import { progressOf } from './actions'
+import { padNumber as pad } from './markdown-write'
 import { derive, isContainer, progressText, type Derived } from './derive'
 
 /** Where the Backend came from: the person's switch, `workspace.yaml`, or the tracker doc. */
@@ -9,6 +10,14 @@ export type BackendSource = 'override' | 'workspace.yaml' | 'issue-tracker.md'
 
 /** The Backend a workspace names, and what named it. */
 export type FoundBackend = { backend: Backend; source: BackendSource }
+
+/** What the write tools need of the file system, and the clock they stamp files with (an ISO time). */
+export type DeckFiles = {
+  read: (path: string) => Promise<string>
+  write: (path: string, text: string) => Promise<void>
+  exists: (path: string) => Promise<boolean>
+  now: () => string
+}
 
 /** What a Deck tool reads: the Backend and every item on it, read once per call. */
 export type DeckTracker = {
@@ -18,6 +27,10 @@ export type DeckTracker = {
   partial: boolean
   /** An item's body and its comments, oldest first. */
   detail: (item: BoardItem) => Promise<{ body: string; comments: string[] }>
+  /** Markdown only: where the write tools put files. GitHub has none, so its writes are refused. */
+  files?: DeckFiles
+  /** Reads the tracker again, to read a write back. */
+  reload?: () => Promise<DeckTracker>
 }
 
 /** One Deck tool as `$.tool.register` takes it, the schema always in the prompt's tool list. */
@@ -36,12 +49,12 @@ const LIST_DEFAULT = 50
 const LIST_MAX = 200
 
 /** `effort` and `feature` (DSH's names) narrow a Markdown key to one `.scratch/<dir>`; GitHub ignores them. */
-const SCOPE_SCHEMA = {
+export const SCOPE_SCHEMA = {
   effort: { type: 'string', description: "Markdown only: the Map's .scratch/<effort> folder. Not with feature." },
   feature: { type: 'string', description: "Markdown only: the Spec's .scratch/<feature-slug> folder. Not with effort." },
 }
 
-const KEY_SCHEMA = {
+export const KEY_SCHEMA = {
   type: ['string', 'number'],
   description:
     'The ticket: on GitHub its issue number (7 or #7); on Markdown <effort>/<NN> (checkout/02, the Map or Spec itself is <effort>/00), its file path, or a number with effort or feature.',
@@ -127,10 +140,9 @@ export const deckContext = (workspace: string, found: FoundBackend | null, items
   }
 }
 
-const pad = (number: number) => String(number).padStart(2, '0')
 
 /** A ticket's key as the model passes it back: `#7` on GitHub, `<effort>/<NN>` on Markdown (`/00` for the Container). */
-const keyOf = (backend: Backend, item: BoardItem): string => {
+export const keyOf = (backend: Backend, item: BoardItem): string => {
   if (backend === 'github') return `#${item.number}`
   if (isContainer(item)) return `${item.feature}/00`
   return item.number === null ? item.path : `${item.feature}/${pad(item.number)}`
@@ -139,11 +151,11 @@ const keyOf = (backend: Backend, item: BoardItem): string => {
 const numberKey = (backend: Backend, feature: string, number: number) =>
   backend === 'github' ? `#${number}` : `${feature}/${pad(number)}`
 
-const stringIn = (value: unknown): string | undefined =>
+export const stringIn = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
 
 /** The `.scratch` folder the call narrows to, or null; both at once is refused. */
-const scopeOf = (input: Record<string, unknown>): string | null => {
+export const scopeOf = (input: Record<string, unknown>): string | null => {
   const effort = stringIn(input.effort)
   const feature = stringIn(input.feature)
   if (effort !== undefined && feature !== undefined) {
@@ -153,7 +165,7 @@ const scopeOf = (input: Record<string, unknown>): string | null => {
 }
 
 /** The item a key names; a key that names none, or several, is refused. */
-const findItem = (tracker: DeckTracker, input: Record<string, unknown>): BoardItem => {
+export const findItem = (tracker: DeckTracker, input: Record<string, unknown>): BoardItem => {
   const raw = String(input.key ?? '').trim()
   if (raw === '') throw new DeckRefusal('Pass the key of the ticket.')
   const scope = scopeOf(input)
@@ -279,7 +291,7 @@ export const deckIssueGet = async (tracker: DeckTracker, input: Record<string, u
   }
 }
 
-const textsIn = (value: unknown): string[] =>
+export const textsIn = (value: unknown): string[] =>
   Array.isArray(value) ? value.flatMap(entry => (typeof entry === 'string' && entry.trim() !== '' ? [entry.trim()] : [])) : []
 
 /** deck_issue_list: the items that match every filter, newest update first, up to the limit. */

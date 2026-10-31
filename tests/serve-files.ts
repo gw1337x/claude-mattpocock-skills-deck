@@ -48,12 +48,15 @@ export const serveFiles = (
     if (text === undefined) return { deny: `ENOENT: ${e.path}` }
     return { value: text }
   })
-  /** A new file is keyed by the longest suffix of its path that sits in a folder the fixture knows. */
+  /** A new file is keyed by the longest suffix of its path that sits in a folder the fixture knows, new subfolders included. */
   const newKey = (path: string): string => {
     const parts = path.replace(/\\/g, '/').split('/')
     for (let i = 0; i < parts.length; i++) {
       const parent = parts.slice(i, -1).join('/')
       if (parent !== '' && isDir(parent)) return parts.slice(i).join('/')
+    }
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (isDir(parts[i]!)) return parts.slice(i).join('/')
     }
     return parts.join('/')
   }

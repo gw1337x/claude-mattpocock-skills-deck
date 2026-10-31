@@ -150,6 +150,7 @@ export const parseItem = (path: string, text: string): BoardItem => {
     claimed: status === 'claimed' || assignees.length > 0,
     updated: 0,
     parent: null,
+    ...progressField(text),
   }
 }
 

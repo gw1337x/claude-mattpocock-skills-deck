@@ -52,6 +52,7 @@ import { hasGithubRemote, readPrs, type Pr } from './prs'
 import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE } from './workspace'
 import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from './skills'
+import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { DECK_READS, DECK_TOOLS, deckContext, DeckRefusal, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
@@ -233,10 +234,22 @@ const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> =>
 const readDeck = async ($: Engine, backend: Backend): Promise<DeckTracker> => {
   const snapshot = await readBoard($, backend)
   if (snapshot.error !== undefined) throw new DeckRefusal(snapshot.error)
+  const readAt = snapshot.readAt
   return {
     backend,
     items: snapshot.items,
     partial: backend === 'github' && snapshot.items.length >= GH_LIST_LIMIT,
+    ...(backend === 'markdown'
+      ? {
+          files: {
+            read: (path: string) => $.fs.read(path),
+            write: (path: string, text: string) => $.fs.write(path, text),
+            exists: (path: string) => $.fs.exists(path),
+            now: () => new Date(readAt).toISOString(),
+          },
+          reload: () => readDeck($, backend),
+        }
+      : {}),
     detail: async item => {
       try {
         if (backend === 'github') return await readGithubDetail(ghRun($), item.number ?? 0)
@@ -258,6 +271,8 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
     return deckContext(await workspaceRoot($), found, items)
   }
   if (found === null) throw new DeckRefusal(NO_BACKEND)
+  const write = DECK_WRITES[name]
+  if (write !== undefined) return write(await readDeck($, found.backend), input)
   const read = DECK_READS[name]
   if (read === undefined) throw new DeckRefusal(`Unknown deck tool ${name}.`)
   return read(await readDeck($, found.backend), input)
@@ -425,18 +440,20 @@ const cardLine = (item: BoardItem): string =>
     .filter(Boolean)
     .join('  ')
 
+const ALL_DECK_TOOLS = [...DECK_TOOLS, ...DECK_WRITE_TOOLS]
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'deck',
       description: 'Open the Skills Deck list beside the chat',
     })
-    for (const tool of DECK_TOOLS) await $.tool.register(tool)
+    for (const tool of ALL_DECK_TOOLS) await $.tool.register(tool)
 
     return next(e)
   })
 
-  for (const tool of DECK_TOOLS) {
+  for (const tool of ALL_DECK_TOOLS) {
     on('tool.call', { tool: `mcp__mattpocock-skills-deck__${tool.name}` }, async ($, e) => {
       try {
         return { result: JSON.stringify(await answerDeckTool($, tool.name, e), null, 2) }

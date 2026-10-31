@@ -615,6 +615,15 @@ const debugOn = async ($: Engine): Promise<boolean> => {
   }
 }
 
+/** The one queue the debug file is written through, with the text it holds for the day being written. */
+const debugFile = { queue: Promise.resolve() as Promise<unknown>, path: '', text: '' }
+
+/** Runs `work` after every earlier debug write, so lines and a clear keep their order. */
+const debugWrite = (work: () => Promise<void>) => {
+  debugFile.queue = debugFile.queue.then(work).catch(() => undefined)
+  return debugFile.queue
+}
+
 /** Sends every later debug line to today's file; false when there is no home to keep it under. */
 const attachDebugSink = async ($: Engine): Promise<boolean> => {
   const home = await homeDir($)
@@ -622,23 +631,17 @@ const attachDebugSink = async ($: Engine): Promise<boolean> => {
     setDebugSink(null)
     return false
   }
-  let path = ''
-  let text = ''
-  let queue: Promise<unknown> = Promise.resolve()
-  // One write at a time, so lines keep their order.
   setDebugSink(message => {
-    queue = queue
-      .then(async () => {
-        const ms = await $.clock.now()
-        const file = logFile(home, ms)
-        if (file !== path) {
-          path = file
-          text = await $.fs.read(file).catch(() => '')
-        }
-        text = appendLine(text, ms, message)
-        await $.fs.write(file, text)
-      })
-      .catch(() => undefined)
+    void debugWrite(async () => {
+      const ms = await $.clock.now()
+      const file = logFile(home, ms)
+      if (file !== debugFile.path) {
+        debugFile.path = file
+        debugFile.text = await $.fs.read(file).catch(() => '')
+      }
+      debugFile.text = appendLine(debugFile.text, ms, message)
+      await $.fs.write(file, debugFile.text)
+    })
   })
   return true
 }
@@ -698,9 +701,11 @@ const debugMenu = ($: Engine) => {
     clear: async () => {
       const where = await todays()
       if (where === null) return
-      await $.fs.write(where.file, '')
-      // The sink keeps today's text; starting it again drops that copy.
-      if (await debugOn($)) await attachDebugSink($)
+      await debugWrite(async () => {
+        debugFile.path = where.file
+        debugFile.text = ''
+        await $.fs.write(where.file, '')
+      })
       $.ui.toast("Cleared today's log.")
     },
   }
@@ -711,8 +716,9 @@ const readWorkspaces = async ($: Engine): Promise<WorkspaceRow[]> => {
   const current = await repoKey($)
   let known: string[] = [current]
   try {
-    known = withWorkspace(await $.store.get(WORKSPACES_KEY), current)
-    await $.store.set(WORKSPACES_KEY, known)
+    const stored = await $.store.get(WORKSPACES_KEY)
+    known = withWorkspace(stored, current)
+    if (JSON.stringify(stored) !== JSON.stringify(known)) await $.store.set(WORKSPACES_KEY, known)
   } catch {
     // No store: only this workspace is known.
   }

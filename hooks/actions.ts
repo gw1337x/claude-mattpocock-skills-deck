@@ -1,4 +1,5 @@
 import type { BoardItem } from '../types'
+import { expandOverride, type Note, type OverrideKey, type Overrides } from './overrides'
 import { TEMPLATES, type TemplateName } from './templates'
 
 export type Action = {
@@ -13,6 +14,8 @@ type Row = {
   name: string
   skill: string
   template: TemplateName
+  /** The templates-file key that replaces this row's prompt; none for a row DSH gives no key. */
+  key?: OverrideKey
   /** Matches on the item's labels, which include the ones its Kind implies. */
   matches: (labels: Set<string>) => boolean
 }
@@ -35,6 +38,7 @@ const urlOf = (item: BoardItem) => item.url ?? item.path
 const valuesFor = (item: BoardItem, extra: Record<string, string> = {}): Record<string, string> => ({
   url: urlOf(item),
   n: String(item.number ?? item.feature),
+  number: String(item.number ?? item.feature),
   title: item.title,
   subIssue: item.url === undefined ? SUB_ISSUE_MARKDOWN : SUB_ISSUE_GITHUB,
   ...extra,
@@ -54,25 +58,27 @@ const effectiveLabels = (item: BoardItem): Set<string> => {
 
 /** The Action ladder: the first row that matches wins. The one table both Backends share. */
 export const LADDER: Row[] = [
-  { name: 'Diagnose', skill: 'triage', template: 'diagnose', matches: l => l.size === 0 || l.has('needs-triage') },
-  { name: 'Take over', skill: 'wayfinder', template: 'takeover', matches: l => l.has('ready-for-human') },
-  { name: 'Supplement', skill: 'wayfinder', template: 'supplement', matches: l => l.has('needs-info') },
-  { name: 'Fix', skill: 'implement', template: 'fix', matches: l => l.has('bug') },
-  { name: 'Discuss', skill: 'wayfinder', template: 'wayfinder', matches: l => l.has('wayfinder:grilling') },
-  { name: 'Research', skill: 'wayfinder', template: 'wayfinder', matches: l => l.has('wayfinder:research') },
-  { name: 'Prototype', skill: 'wayfinder', template: 'wayfinder', matches: l => l.has('wayfinder:prototype') },
-  { name: 'Execute', skill: 'wayfinder', template: 'wayfinder', matches: l => l.has('wayfinder:task') },
+  { name: 'Diagnose', skill: 'triage', template: 'diagnose', key: 'diagnose', matches: l => l.size === 0 || l.has('needs-triage') },
+  { name: 'Take over', skill: 'wayfinder', template: 'takeover', key: 'takeover', matches: l => l.has('ready-for-human') },
+  { name: 'Supplement', skill: 'wayfinder', template: 'supplement', key: 'supplement', matches: l => l.has('needs-info') },
+  { name: 'Fix', skill: 'implement', template: 'fix', key: 'fix', matches: l => l.has('bug') },
+  { name: 'Discuss', skill: 'wayfinder', template: 'wayfinder', key: 'discuss', matches: l => l.has('wayfinder:grilling') },
+  { name: 'Research', skill: 'wayfinder', template: 'wayfinder', key: 'research', matches: l => l.has('wayfinder:research') },
+  { name: 'Prototype', skill: 'wayfinder', template: 'wayfinder', key: 'prototype', matches: l => l.has('wayfinder:prototype') },
+  { name: 'Execute', skill: 'wayfinder', template: 'wayfinder', key: 'execute', matches: l => l.has('wayfinder:task') },
   { name: 'Implement', skill: 'implement', template: 'implement', matches: l => l.has('ready-for-agent') },
-  { name: 'Execute', skill: 'wayfinder', template: 'wayfinder', matches: () => true },
+  { name: 'Execute', skill: 'wayfinder', template: 'wayfinder', key: 'execute', matches: () => true },
 ]
 
 /** The one Action for a Ticket, or none once it is closed. */
-export const actionFor = (item: BoardItem): Action | undefined => {
+export const actionFor = (item: BoardItem, overrides: Overrides = {}, note?: Note): Action | undefined => {
   if (item.state === 'closed') return undefined
   const labels = effectiveLabels(item)
   const row = LADDER.find(candidate => candidate.matches(labels))
   if (!row) return undefined
-  const text = fill(TEMPLATES[row.template], valuesFor(item))
+  const override = row.key === undefined ? undefined : overrides[row.key]
+  const values = valuesFor(item)
+  const text = override === undefined ? fill(TEMPLATES[row.template], values) : expandOverride(override, values, note)
   return { name: row.name, skill: row.skill, prompt: row.name === 'Execute' ? withWayfinder(text) : text }
 }
 
@@ -89,7 +95,12 @@ export const progressOf = (children: BoardItem[]): Progress => {
  * The one Action for a Map or Spec, decided by its children as DSH does: a Container with none is empty
  * (Inspect a Map, Split a Spec), with any open is open (Execute), with all closed is done (Complete).
  */
-export const containerAction = (container: BoardItem, children: BoardItem[]): Action | undefined => {
+export const containerAction = (
+  container: BoardItem,
+  children: BoardItem[],
+  overrides: Overrides = {},
+  note?: Note,
+): Action | undefined => {
   if (container.state === 'closed') return undefined
   const { total, open, closed } = progressOf(children)
   const counts = { closed: String(closed), total: String(total) }
@@ -112,7 +123,7 @@ export const containerAction = (container: BoardItem, children: BoardItem[]): Ac
     if (open > 0) return spec('Execute', 'implement-spec', 'specExecute')
     return spec('Complete', 'implement-spec', 'specComplete')
   }
-  return actionFor(container)
+  return actionFor(container, overrides, note)
 }
 
 export const HEALTH_CHECK_PROMPT =

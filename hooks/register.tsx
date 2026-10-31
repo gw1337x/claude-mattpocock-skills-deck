@@ -14,6 +14,7 @@ import {
   progressOf,
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
+import { debugNote } from './debug-log'
 import {
   actionText,
   KIND_NAMES,
@@ -57,6 +58,7 @@ import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
+import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
@@ -67,6 +69,20 @@ const FILLED = { plugin: 'mattpocock-skills-deck', key: 'filled' } as const
 const PENDING_TITLE = { plugin: 'mattpocock-skills-deck', key: 'pendingTitle' } as const
 const DECK_RENAMING = { plugin: 'mattpocock-skills-deck', key: 'deckRenaming' } as const
 const PERSON_TITLED = { plugin: 'mattpocock-skills-deck', key: 'personTitled' } as const
+
+/** The templates file's overrides, read fresh each time so removing one restores DSH's text; none when it is absent. */
+const readOverrides = async ($: Engine): Promise<Overrides> =>
+  parseOverrides(await $.fs.read(TEMPLATES_FILE).catch(() => ''), debugNote)
+
+/** DSH's `{ts}`: `YYYYMMDD-HHMMSS-mmm`. */
+const stampOf = (ms: number) => new Date(ms).toISOString().replace(/\D/g, '').replace(/^(\d{8})(\d{6})(\d{3}).*$/, '$1-$2-$3')
+
+/** A quick-Action's prompt, with the person's override in place of DSH's text if there is one. */
+const quickPrompt = async ($: Engine, key: 'handoff1' | 'handoff2' | 'fixate', fallback: string) =>
+  fillPrompt(
+    $,
+    promptFor(key, await readOverrides($), fallback, { ts: stampOf(await $.clock.now()) }, debugNote),
+  )
 
 /** `title` is what the session is called once this prompt is sent; null marks a draft, undefined a prompt that never renames. */
 const fillPrompt = async ($: Engine, text: string, title?: string | null) => {
@@ -764,9 +780,9 @@ export const register: Register = on => {
             'Triage',
             needsTriage,
           )}
-          {!collapsed && item('consolidate', 'Consolidate', PURPLE, () => fillPrompt($, CONSOLIDATE_PROMPT), '▤', 'Consolidate')}
-          {!collapsed && item('handoff', 'Handoff', BLUE, () => fillPrompt($, HANDOFF_PROMPT), '⇆', 'Handoff')}
-          {!collapsed && item('continue', 'Continue from a handoff', BLUE, () => fillPrompt($, CONTINUE_PROMPT), '⎘')}
+          {!collapsed && item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', 'Consolidate')}
+          {!collapsed && item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', 'Handoff')}
+          {!collapsed && item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘')}
           {!collapsed &&
             item(
               'checks',
@@ -816,8 +832,11 @@ export const register: Register = on => {
     // Only the List and the Palette draw label colours.
     const colors: Colors = tab === 'list' || tab === 'palette' ? await readColors($, backend) : {}
     // A Container's Action depends on its children; every other item's on the ladder alone.
+    const overrides = await readOverrides($)
     const actionOf = (item: BoardItem, all: BoardItem[]) =>
-      isContainer(item) ? containerAction(item, childrenOf(all, item.path)) : actionFor(item)
+      isContainer(item)
+        ? containerAction(item, childrenOf(all, item.path), overrides, debugNote)
+        : actionFor(item, overrides, debugNote)
     const renderAction = (item: BoardItem, all: BoardItem[]) => {
       const action = actionOf(item, all)
       return action ? (

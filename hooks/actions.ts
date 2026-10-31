@@ -211,6 +211,9 @@ export const bugPrompt = (repo: string, fields: BugFields): string => {
 /** DSH's `handoff1`; `{ts}` is filled when the button is pressed. */
 export const HANDOFF_PROMPT = TEMPLATES.handoff1
 
+/** DSH's `handoff2`; `{path}` is the newest handoff doc. */
+export const HANDOFF_NEW_PROMPT = TEMPLATES.handoff2
+
 export const CONTINUE_PROMPT = 'Continue from this handoff file: '
 
 /** DSH's `fixate`, word for word. */

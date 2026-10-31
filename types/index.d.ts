@@ -143,6 +143,8 @@ declare module 'claude-code' {
       rowLabels: string[]
       /** The row whose Copy link was last pressed, whether it worked, and when. */
       copied: { path: string; ok: boolean; at: number } | null
+      /** Extra pages of comments loaded on the Ticket detail at `path`. */
+      commentPages: { path: string; pages: number } | null
       /** True once the REST-fallback notice was hidden for this session. */
       restHidden: boolean
       /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */

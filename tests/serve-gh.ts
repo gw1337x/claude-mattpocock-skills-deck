@@ -63,6 +63,8 @@ export type GhFailure = 'missing' | 'logged-out' | 'rate-limit' | 'other'
 export type GhServer = {
   /** Every `gh` call made, as one string each. */
   calls: string[]
+  /** Every `git` call made except `remote -v`, as one string each. */
+  gitCalls: string[]
   /** Comments on issues, by number, in the order posted (seeded ones first). */
   comments: Record<number, string[]>
   /** The issues as writes have left them (a copy of GITHUB_ISSUES to start with). */
@@ -89,12 +91,19 @@ export const serveGh = (
     colors?: Record<string, string>
     /** Extra plain open issues (numbered after the fixture's) so a read spans several pages. */
     padIssues?: number
+    /** The folder is not a git repo: `git rev-parse` says so, and Create and publish can run. */
+    noRepo?: boolean
+    /** `gh repo create` fails with this stderr. */
+    createFails?: string
+    /** `git push` fails with this stderr this many times before it works. */
+    pushFails?: { stderr: string; times: number }
     /** GraphQL reads fail while the REST read works. */
     graphqlDown?: boolean
   } = {},
 ): GhServer => {
   const server: GhServer = {
     calls: [],
+    gitCalls: [],
     comments: { ...options.comments },
     issues: GITHUB_ISSUES.map(each => ({ ...each, labels: [...each.labels], assignees: [...each.assignees] })),
     subIssues: Object.fromEntries(Object.entries(SUB_ISSUES).map(([key, value]) => [key, [...value]])),
@@ -106,12 +115,28 @@ export const serveGh = (
   const flags = (rest: string[], flag: string) => rest.flatMap((arg, i) => (arg === flag ? [rest[i + 1] ?? ''] : []))
   const byId = (id: number) => id - 1000
   const colors = { ...options.colors }
+  let created = false
+  let pushesLeft = options.pushFails?.times ?? 0
   const reply = (stdout: string, exitCode = 0, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
   })
 
   on('process.run', (_, e) => {
     const argv = [...e.argv]
+    if (argv[0] === 'git' && argv[1] === 'rev-parse') {
+      return options.noRepo && !created
+        ? reply('', 128, 'fatal: not a git repository (or any of the parent directories): .git')
+        : reply('true\n')
+    }
+    if (argv[0] === 'git' && argv[1] !== 'remote') {
+      server.gitCalls.push(argv.slice(1).join(' '))
+      if (argv[1] === 'init') created = true
+      if (argv[1] === 'push' && pushesLeft > 0) {
+        pushesLeft--
+        return reply('', 1, options.pushFails?.stderr ?? '')
+      }
+      return reply('')
+    }
     if (argv[0] === 'git' && argv[1] === 'remote') {
       return reply(options.remote ?? 'origin\thttps://github.com/acme/shop.git (fetch)\n')
     }
@@ -141,6 +166,11 @@ export const serveGh = (
     if (argv[1] === 'label' && argv[2] === 'create') {
       known.add(argv[3] ?? '')
       return reply('')
+    }
+    if (argv[1] === 'repo' && argv[2] === 'create') {
+      if (options.createFails) return reply('', 1, options.createFails)
+      return reply(`https://github.com/jock/${argv[3]}
+`)
     }
     if (line.startsWith('pr list')) return reply(JSON.stringify(GITHUB_PRS))
     if (line.startsWith('issue list') && argv.includes('--search')) {

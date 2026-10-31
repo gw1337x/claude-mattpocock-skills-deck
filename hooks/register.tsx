@@ -59,6 +59,7 @@ import {
   type Colors,
 } from './palette'
 import { hasGithubRemote, readPrs, type Pr } from './prs'
+import { initPublish, isGitRepo, PUBLISH_ERRORS, retryPush, validName, type PublishResult } from './publish'
 import { readMarkdownItems } from './markdown-tracker'
 import { readWorkspace, WORKSPACE_FILE, type Layout } from './workspace'
 import {
@@ -224,6 +225,7 @@ const COMMENT_PAGES = { plugin: 'mattpocock-skills-deck', key: 'commentPages' } 
 const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
 const GATE_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'gateChoice' } as const
 const SWITCH_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'switchChoice' } as const
+const PUBLISH_FLOW = { plugin: 'mattpocock-skills-deck', key: 'publishFlow' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -696,6 +698,57 @@ const saveLayout = async ($: Engine, layout: Layout) => {
 const openGate = async ($: Engine) => {
   await $.state.set(GATE_CHOICE, { backend: 'github', layout: await readLayout($) })
   await $.ui.open({ id: GATE_PANE, title: 'Select a backend', focus: true, closeOnEscape: true })
+}
+
+const PUBLISH_PANE = 'publish'
+
+const noRepoKey = async ($: Engine) => `no-repo-ignored:${await workspaceRoot($)}`
+
+/** Whether the person ignored the not-a-repo card in this workspace; shown when the store cannot say. */
+const readNoRepoIgnored = async ($: Engine): Promise<boolean> => {
+  try {
+    return (await $.store.get(await noRepoKey($))) === true
+  } catch {
+    return false
+  }
+}
+
+const setNoRepoIgnored = async ($: Engine, ignored: boolean) => {
+  try {
+    await $.store.set(await noRepoKey($), ignored)
+  } catch {
+    // Without a store the choice lasts only until the next draw.
+  }
+  $.ui.invalidate('ui.render')
+}
+
+/** Opens Create and publish in its own focused Pane, the repository name starting as the folder's name. */
+const openPublish = async ($: Engine) => {
+  const folder = (await workspaceRoot($)).split(/[\\/]/).filter(Boolean).pop() ?? ''
+  const name = folder.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 100)
+  await $.state.set(PUBLISH_FLOW, { name, visibility: 'private', busy: false, failure: null, done: null })
+  await $.ui.open({ id: PUBLISH_PANE, title: 'Create and publish', focus: true, closeOnEscape: true })
+}
+
+const closePublish = async ($: Engine) => {
+  await $.state.set(PUBLISH_FLOW, null)
+  await $.ui.close({ id: PUBLISH_PANE })
+}
+
+/** Runs the publish (or the push retry) and keeps its outcome on the form; a success re-reads the repo's state. */
+const runPublish = async ($: Engine, attempt: () => Promise<PublishResult>) => {
+  const flow = (await $.state.get(PUBLISH_FLOW)).value
+  if (!flow || flow.busy) return
+  await $.state.set(PUBLISH_FLOW, { ...flow, busy: true, failure: null })
+  const result = await attempt()
+  const after = (await $.state.get(PUBLISH_FLOW)).value
+  if (!after) return
+  if (result.ok) {
+    await $.state.set(PUBLISH_FLOW, { ...after, busy: false, done: { owner: result.owner, name: result.name, repoUrl: result.repoUrl } })
+    await refresh($)
+  } else {
+    await $.state.set(PUBLISH_FLOW, { ...after, busy: false, failure: result })
+  }
 }
 
 const SWITCH_PANE = 'switch'
@@ -1325,6 +1378,80 @@ ${card.chain}`}</Text>
     )
   })
 
+  on('ui.render', { component: 'Pane', requestId: PUBLISH_PANE }, async ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Link, Text } = elements
+    const Input = 'Input' in elements ? elements.Input : undefined
+    const flow = (await $.state.get(PUBLISH_FLOW)).value
+    if (!flow) return <Text dimColor>Nothing to publish.</Text>
+    if (flow.done) {
+      const { owner, name, repoUrl } = flow.done
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          <Text color={GREEN} weight="semibold">{`Created ${owner ? `${owner}/${name}` : name}`}</Text>
+          {repoUrl !== '' && <Link href={repoUrl}>{repoUrl}</Link>}
+          <Button key="publish-close" label="Close" variant="primary" onPress={() => closePublish($)} />
+        </Box>
+      )
+    }
+    const nameOk = validName(flow.name.trim())
+    const edit = (change: Partial<typeof flow>) => $.state.set(PUBLISH_FLOW, { ...flow, ...change })
+    const failure = flow.failure
+    return (
+      <Box flexDirection="column" rowGap="sm">
+        <Text weight="semibold">Create and publish</Text>
+        <Text dimColor size="footnote">Initialises git here, commits everything, and creates the GitHub repository with gh.</Text>
+        {Input ? (
+          <Input
+            key="publish-name"
+            label="Repository name"
+            value={flow.name}
+            onInput={(value: string) => void edit({ name: value })}
+            onSubmit={(value: string) => edit({ name: value })}
+          />
+        ) : (
+          <Text>{`Repository name: ${flow.name}`}</Text>
+        )}
+        {!nameOk && <Text color={AMBER}>{PUBLISH_ERRORS['bad-name']}</Text>}
+        <Box flexDirection="row" columnGap="sm">
+          {(['public', 'private'] as const).map(each => (
+            <Button key={`publish-${each}`} label={each === 'public' ? 'Public' : 'Private'} onPress={() => edit({ visibility: each })}>
+              <Text weight={flow.visibility === each ? 'semibold' : undefined}>
+                {`${flow.visibility === each ? '●' : '○'} ${each === 'public' ? 'Public' : 'Private'}`}
+              </Text>
+            </Button>
+          ))}
+        </Box>
+        {failure && (
+          <Box flexDirection="column">
+            <Text color={RED}>{failure.message}</Text>
+            {failure.detail !== '' && <Text dimColor size="footnote">{failure.detail}</Text>}
+            {failure.repoUrl !== '' && <Link href={failure.repoUrl}>{failure.repoUrl}</Link>}
+          </Box>
+        )}
+        {flow.busy && <Text dimColor>Working…</Text>}
+        <Box flexDirection="row" columnGap="sm">
+          <Button key="publish-cancel" label="Cancel" onPress={() => closePublish($)} />
+          {failure?.halfCreated ? (
+            <Button
+              key="publish-retry"
+              label="Retry"
+              variant="primary"
+              onPress={() => runPublish($, () => retryPush(ghRun($), { name: failure.name, owner: failure.owner, repoUrl: failure.repoUrl }))}
+            />
+          ) : (
+            <Button
+              key="publish-submit"
+              label="Submit"
+              variant="primary"
+              onPress={() => (nameOk ? runPublish($, () => initPublish(ghRun($), { name: flow.name, visibility: flow.visibility })) : undefined)}
+            />
+          )}
+        </Box>
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: SWITCH_PANE }, async ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box, Button, Text } = elements
@@ -1727,9 +1854,27 @@ ${card.chain}`}</Text>
       const checks = (await $.state.get(ENV_CHECKS)).value ?? (await runEnvChecks($, backend))
       const { passed, total } = scoreOf(checks)
       const layout = await readLayout($)
+      const noRepo = !(await isGitRepo(ghRun($)))
+      const noRepoIgnored = noRepo && (await readNoRepoIgnored($))
       return (
         <Box flexDirection="column">
           {tabBar}
+          {noRepo && !noRepoIgnored && (
+            <Box key="no-repo" flexDirection="column" borderStyle="round" borderColor={RED} padding="sm" rowGap="xs">
+              <Text color={RED} weight="semibold">Current workspace is not a Git repo — click to initialise and publish</Text>
+              <Text dimColor size="footnote">Turn it into a GitHub repository and publish it</Text>
+              <Box flexDirection="row" columnGap="sm">
+                <Button key="norepo-create" label="Create and publish" variant="primary" onPress={() => openPublish($)} />
+                <Button key="norepo-ignore" label="Ignore" onPress={() => setNoRepoIgnored($, true)} />
+              </Box>
+            </Box>
+          )}
+          {noRepoIgnored && (
+            <Box key="no-repo-ignored" flexDirection="row" columnGap="sm" alignItems="center">
+              <Text dimColor>The not-a-Git-repo card is ignored in this workspace</Text>
+              <Button key="norepo-reset" label="Reset ignore" onPress={() => setNoRepoIgnored($, false)} />
+            </Box>
+          )}
           <Text bold>{`Checks ${passed}/${total}`}</Text>
           <Box>
             <Button

@@ -1,3 +1,5 @@
+import type { PublishFailure, Visibility } from '../hooks/publish'
+
 export type Backend = 'github' | 'markdown'
 
 /** How the repo's domain docs are laid out: one glossary for all, or one per subproject. */
@@ -140,6 +142,14 @@ declare module 'claude-code' {
       gateChoice: { backend: Backend; layout: Layout } | null
       /** The switch modal's picks while it is open; absent or null means it is closed. */
       switchChoice: { from: Backend; to: Backend; option: 'keep' | 'migrate' | 'clear'; prompt: string; checks: Check[] } | null
+      /** The Create and publish form while it is open (and its outcome); absent or null means it is closed. */
+      publishFlow: {
+        name: string
+        visibility: Visibility
+        busy: boolean
+        failure: PublishFailure | null
+        done: { owner: string; name: string; repoUrl: string } | null
+      } | null
       /** What the last refresh changed or added, and when; the List flashes those rows. */
       flash: { changed: string[]; added: string[]; at: number } | null
       /** Extra pages of closed rows loaded under the Closed fold. */

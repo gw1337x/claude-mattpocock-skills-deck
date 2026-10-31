@@ -55,6 +55,9 @@ const SUB_ISSUES: Record<number, number[]> = { 1: [2, 3, 4], 5: [6, 7] }
 /** Native issue dependencies; #3 declares its blocker in the body instead. */
 const BLOCKED_BY: Record<number, number[]> = { 7: [6] }
 
+/** Issues per fake GraphQL page. */
+const PAGE_SIZE = 100
+
 export type GhFailure = 'missing' | 'logged-out' | 'rate-limit' | 'other'
 
 export type GhServer = {
@@ -84,6 +87,8 @@ export const serveGh = (
     loggedOut?: boolean
     /** Colours (6-digit hex) the repo's labels have, by label name; `gh label edit --color` changes them. */
     colors?: Record<string, string>
+    /** Extra plain open issues (numbered after the fixture's) so a read spans several pages. */
+    padIssues?: number
   } = {},
 ): GhServer => {
   const server: GhServer = {
@@ -93,6 +98,7 @@ export const serveGh = (
     subIssues: Object.fromEntries(Object.entries(SUB_ISSUES).map(([key, value]) => [key, [...value]])),
     blockedBy: Object.fromEntries(Object.entries(BLOCKED_BY).map(([key, value]) => [key, [...value]])),
   }
+  for (let i = 0; i < (options.padIssues ?? 0); i++) server.issues.push(issue(100 + i, `Padding ${i}`))
   const known = new Set(options.labels ?? ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix', 'bug'])
   const find = (number: number) => server.issues.find(each => each.number === number)
   const flags = (rest: string[], flag: string) => rest.flatMap((arg, i) => (arg === flag ? [rest[i + 1] ?? ''] : []))
@@ -140,6 +146,21 @@ export const serveGh = (
       return reply(JSON.stringify(server.issues.filter(each => each.body.includes(needle)).map(({ number, body }) => ({ number, body }))))
     }
     if (line.startsWith('issue list')) return reply(JSON.stringify(server.issues))
+    if (argv[1] === 'api' && argv[2] === 'graphql') {
+      const start = Number(/^cursor=(\d+)$/.exec(flags(argv, '-F').find(each => each.startsWith('cursor=')) ?? '')?.[1] ?? 0)
+      const page = server.issues.slice(start, start + PAGE_SIZE)
+      const parentOf = (number: number) => Object.entries(server.subIssues).find(([, kids]) => kids.includes(number))?.[0]
+      const nodes = page.map(each => ({
+        ...each,
+        labels: { nodes: each.labels },
+        assignees: { nodes: each.assignees },
+        blockedBy: { nodes: (server.blockedBy[each.number] ?? []).map(number => ({ number })) },
+        parent: parentOf(each.number) === undefined ? null : { number: Number(parentOf(each.number)) },
+      }))
+      const end = start + page.length
+      const issues = { pageInfo: { hasNextPage: end < server.issues.length, endCursor: String(end) }, nodes }
+      return reply(JSON.stringify({ data: { repository: { issues } } }))
+    }
     const one = /^api repos\/\{owner\}\/\{repo\}\/issues\/(\d+)$/.exec(line)
     if (one) return reply(JSON.stringify({ id: 1000 + Number(one[1]) }))
     const write = /^api --method (POST|DELETE) repos\/\{owner\}\/\{repo\}\/issues\/(\d+)\/(sub_issues|sub_issue|dependencies\/blocked_by(?:\/(\d+))?)/.exec(line)

@@ -1350,7 +1350,7 @@ export const register: Register = on => {
               const mark = entry.source === 'reported' ? '' : ' · auto'
               const who = owner === session ? 'this session' : label
               const cell = (column: (typeof ROUTE_COLUMNS)[number][0], content: RenderChildren) => (
-                <Box key={`route:${index}:${column}`} width={ROUTE_WIDTHS[column]}>
+                <Box key={`route:${index}:${column}`} width={ROUTE_WIDTHS[column]} alignItems="flex-start">
                   {content}
                 </Box>
               )
@@ -1376,7 +1376,7 @@ export const register: Register = on => {
                 <Box key={`route-row:${index}`} flexDirection="row" columnGap="md">
                   {press('Session', <Text dimColor size="footnote">{who}</Text>)}
                   {press('Ticket', <Text color={BLUE} mono weight="semibold">{`#${numberOf(entry.ticketKey)}`}</Text>)}
-                  {press('Title', <Text>{entry.title}</Text>)}
+                  {press('Title', <Text wrap="truncate">{entry.title}</Text>)}
                   {press('Action', <Text backgroundColor={DSH.border} color={DSH.text} size="footnote">{` ${actionWord(entry.action)}${mark} `}</Text>)}
                   {press('State', <Text dimColor size="footnote">{state}</Text>)}
                   {press('When', <Text dimColor size="footnote">{when}</Text>)}

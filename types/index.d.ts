@@ -119,7 +119,7 @@ declare module 'claude-code' {
       /** True while the label chips show every label, not the first four. */
       labelsOpen: boolean
       /** Which Pane tab is shown; absent means the List. */
-      tab: 'list' | 'skills' | 'prs' | 'checks' | 'palette'
+      tab: 'list' | 'skills' | 'prs' | 'checks' | 'palette' | 'settings' | 'vc'
       /** Name of the skill whose SKILL.md the Skills tab shows; absent or null shows the list. */
       skillDetail: string | null
       /** The Checks rows as last run; absent means the tab runs the checks when drawn. */
@@ -132,6 +132,8 @@ declare module 'claude-code' {
       paletteDrafts: Record<string, string> | null
       /** True while the Palette asks whether to discard unsaved changes before closing. */
       paletteAsk: boolean
+      settingsTick: number
+      settingsConfirm: boolean
       /** True while the Capsule band's Skills menu is open. */
       skillsMenu: boolean
       /** True while the Capsule band's Work Route list is open. */

@@ -6,16 +6,18 @@ type Started = { prompt: string; folder: string | null; link: string }
  * The fake Desktop link opener (`powershell Start-Process`), the prompt box, `/rename`, the clipboard, toasts and an
  * in-memory store. `mode` makes the opener throw, or exit non-zero, as a Desktop that cannot open the link would.
  */
-export const serveSession = (on: On, mode: 'works' | 'throws' | 'isError' = 'works') => {
-  const held: Record<string, unknown> = {}
+export const serveSession = (on: On, mode: 'works' | 'throws' | 'isError' = 'works', stored: Record<string, unknown> = {}) => {
+  const held: Record<string, unknown> = { ...stored }
   const log = {
     started: [] as Started[],
     fills: [] as string[],
     copied: [] as string[],
     toasts: [] as string[],
     renames: [] as string[],
+    runs: [] as string[][],
   }
   on('process.run', (_, e) => {
+    log.runs.push([...e.argv])
     const link = /Start-Process '(.*)'$/.exec(e.argv[e.argv.length - 1] ?? '')?.[1]
     if (link === undefined) return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
     const query = new URL(link).searchParams

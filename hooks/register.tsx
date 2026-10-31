@@ -22,7 +22,20 @@ import {
 } from './actions'
 import { BACKEND_NAMES, detectBackend } from './backend'
 import { cells, FOLD_PRIORITY, wordsShown, type Segment } from './capsule'
-import { debugNote } from './debug-log'
+import {
+  appendLine,
+  DEBUG_KEY,
+  debugNote,
+  exportFile,
+  logDir,
+  logFile,
+  openFolderArgv,
+  setDebugSink,
+  sourceName,
+  withWorkspace,
+  WORKSPACES_KEY,
+  type WorkspaceRow,
+} from './debug-log'
 import {
   actionText,
   KIND_NAMES,
@@ -275,6 +288,8 @@ const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as c
 const GATE_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'gateChoice' } as const
 const SWITCH_CHOICE = { plugin: 'mattpocock-skills-deck', key: 'switchChoice' } as const
 const PUBLISH_FLOW = { plugin: 'mattpocock-skills-deck', key: 'publishFlow' } as const
+const SETTINGS_TICK = { plugin: 'mattpocock-skills-deck', key: 'settingsTick' } as const
+const SETTINGS_CONFIRM = { plugin: 'mattpocock-skills-deck', key: 'settingsConfirm' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -343,27 +358,33 @@ const readRoute = async ($: Engine, backend: Backend): Promise<RouteStore> => {
   }
 }
 
-/** The person's override for this repo if there is one, else `workspace.yaml`, else what the tracker doc names; null when none names one. */
-const findBackend = async ($: Engine): Promise<FoundBackend | null> => {
+/**
+ * The Backend a workspace names: the person's override for it if there is one, else its `workspace.yaml`, else what its
+ * tracker doc names; null when none names one. `root` is where its files live, '' for the session's own folder.
+ */
+const findBackendAt = async ($: Engine, key: string, root: string): Promise<FoundBackend | null> => {
+  const at = (path: string) => (root === '' ? path : `${root}/${path}`)
   try {
-    const stored = await $.store.get(await overrideKey($))
+    const stored = await $.store.get(`backend:${key}`)
     if (stored === 'github' || stored === 'markdown') return { backend: stored, source: 'override' }
   } catch {
     // No store: detection decides.
   }
   try {
-    const workspace = readWorkspace(await $.fs.read(WORKSPACE_FILE)).backend
+    const workspace = readWorkspace(await $.fs.read(at(WORKSPACE_FILE))).backend
     if (workspace !== null) return { backend: workspace, source: 'workspace.yaml' }
   } catch {
     // No workspace.yaml: the tracker doc decides.
   }
   try {
-    const named = detectBackend(await $.fs.read(TRACKER_DOC))
+    const named = detectBackend(await $.fs.read(at(TRACKER_DOC)))
     return named === null ? null : { backend: named, source: 'issue-tracker.md' }
   } catch {
     return null
   }
 }
+
+const findBackend = async ($: Engine): Promise<FoundBackend | null> => findBackendAt($, await repoKey($), '')
 
 /** The Backend the List draws: as found, else Markdown. */
 const resolveBackend = async ($: Engine): Promise<Backend> => (await findBackend($))?.backend ?? 'markdown'
@@ -584,6 +605,123 @@ const homeDir = async ($: Engine): Promise<string | undefined> => {
     // No home: only the project's skills are tried.
     return undefined
   }
+}
+
+const debugOn = async ($: Engine): Promise<boolean> => {
+  try {
+    return (await $.store.get(DEBUG_KEY)) === true
+  } catch {
+    return false
+  }
+}
+
+/** Sends every later debug line to today's file; false when there is no home to keep it under. */
+const attachDebugSink = async ($: Engine): Promise<boolean> => {
+  const home = await homeDir($)
+  if (home === undefined) {
+    setDebugSink(null)
+    return false
+  }
+  let path = ''
+  let text = ''
+  let queue: Promise<unknown> = Promise.resolve()
+  // One write at a time, so lines keep their order.
+  setDebugSink(message => {
+    queue = queue
+      .then(async () => {
+        const ms = await $.clock.now()
+        const file = logFile(home, ms)
+        if (file !== path) {
+          path = file
+          text = await $.fs.read(file).catch(() => '')
+        }
+        text = appendLine(text, ms, message)
+        await $.fs.write(file, text)
+      })
+      .catch(() => undefined)
+  })
+  return true
+}
+
+/** The debug switch: it is kept across sessions, and while it is on every debug line also goes to today's file. */
+const setDebug = async ($: Engine, on: boolean) => {
+  if (on) {
+    if (!(await attachDebugSink($))) return $.ui.toast('No home folder to keep the debug log in.')
+    await $.store.set(DEBUG_KEY, true)
+    debugNote('Debug log turned on')
+  } else {
+    debugNote('Debug log turned off')
+    await $.store.set(DEBUG_KEY, false)
+    // The off line is already queued; the sink drops every line after it.
+    setDebugSink(null)
+  }
+  await $.state.set(SETTINGS_TICK, (await $.clock.now()) + Math.random())
+}
+
+/** The debug log's four commands, shared by the Settings view and the Status capsule's dot. */
+const debugMenu = ($: Engine) => {
+  const todays = async () => {
+    const home = await homeDir($)
+    return home === undefined ? null : { home, file: logFile(home, await $.clock.now()) }
+  }
+  return {
+    exportLog: async () => {
+      const where = await todays()
+      if (where === null) return $.ui.toast('No home folder to export from.')
+      const text = await $.fs.read(where.file).catch(() => null)
+      if (text === null) return $.ui.toast("There is no log for today yet.")
+      const target = exportFile(where.home, await $.clock.now())
+      await $.fs.write(target, text)
+      $.ui.toast(`Exported today's log to ${target}`)
+    },
+    openFolder: async () => {
+      const home = await homeDir($)
+      if (home === undefined) return $.ui.toast('No home folder to open.')
+      try {
+        // A file manager often exits non-zero after it opens; only a refusal to start is a failure.
+        await $.process.run(openFolderArgv(logDir(home)))
+      } catch {
+        $.ui.toast(`Could not open ${logDir(home)}`)
+      }
+    },
+    copyPath: async (surface: RenderSurface) => {
+      const where = await todays()
+      if (where === null) return $.ui.toast('No home folder to copy a path from.')
+      let ok = true
+      try {
+        ok = (await $.ui.copy({ text: where.file, surface })).isCopied !== false
+      } catch {
+        ok = false
+      }
+      $.ui.toast(ok ? 'Copied the log path.' : 'Could not copy the log path.')
+    },
+    clear: async () => {
+      const where = await todays()
+      if (where === null) return
+      await $.fs.write(where.file, '')
+      // The sink keeps today's text; starting it again drops that copy.
+      if (await debugOn($)) await attachDebugSink($)
+      $.ui.toast("Cleared today's log.")
+    },
+  }
+}
+
+/** Every workspace the deck has run in, this one first, with where its Backend came from. */
+const readWorkspaces = async ($: Engine): Promise<WorkspaceRow[]> => {
+  const current = await repoKey($)
+  let known: string[] = [current]
+  try {
+    known = withWorkspace(await $.store.get(WORKSPACES_KEY), current)
+    await $.store.set(WORKSPACES_KEY, known)
+  } catch {
+    // No store: only this workspace is known.
+  }
+  const rows: WorkspaceRow[] = []
+  for (const root of known) {
+    const found = await findBackendAt($, root, root === current ? '' : root)
+    rows.push({ root, backend: found?.backend ?? null, source: sourceName(found) })
+  }
+  return rows
 }
 
 /**
@@ -939,6 +1077,8 @@ export const register: Register = on => {
     })
     for (const tool of ALL_DECK_TOOLS) await $.tool.register(tool)
     await $.tool.register(SUGGEST_TOOL)
+    if (await debugOn($)) await attachDebugSink($)
+    await readWorkspaces($)
 
     return next(e)
   })
@@ -1038,6 +1178,9 @@ export const register: Register = on => {
     const routeOpen = (await $.state.get(ROUTE_OPEN)).value ?? false
     const collapsed = await readCollapsed($)
     const refreshing = (await $.state.get(REFRESHING)).value ?? false
+    await $.state.get(SETTINGS_TICK)
+    const debugging = await debugOn($)
+    const debug = debugMenu($)
     const now = await $.clock.now()
     const backend = await resolveBackend($)
     const route = await readRoute($, backend)
@@ -1326,7 +1469,7 @@ export const register: Register = on => {
                 'tip:refresh',
               )}
               {item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞', words.has('skills') ? 'Skills' : undefined)}
-              {/* The debug-dot slot: the debug log's menu draws here once the log is on. */}
+              {debugging && item('debug-dot', 'Debug log', GREY_INK, () => undefined, '●', undefined, undefined, 'menu:debug')}
               {item('band-collapse', 'Collapse', GREY_INK, () => setCollapsed($, true), '⌄')}
             </Box>
             {/* One fixed row the hovered segment's menu or tooltip swaps into, so a hover never moves the capsule. */}
@@ -1341,6 +1484,18 @@ export const register: Register = on => {
                   <Text color={RED}>{'＋ New'}</Text>
                 </Button>
               </Box>
+              {debugging && (
+                <Box key="reveal:debug" position="absolute" top={0} left={0} display="none" flexDirection="row" columnGap="sm" hover={{ scope: 'menu:debug', display: 'flex' }}>
+                  <Button key="debug-menu-export" label="Export today's log" onPress={() => debug.exportLog()}>Export</Button>
+                  <Button key="debug-menu-open" label="Open folder" onPress={() => debug.openFolder()}>Open folder</Button>
+                  <Button key="debug-menu-copy" label="Copy path" onPress={press => debug.copyPath(press.surface)}>Copy path</Button>
+                  <Button key="debug-menu-clear" label="Clear" onPress={async () => {
+                    await $.state.set(SETTINGS_CONFIRM, true)
+                    await $.state.set(TAB, 'settings')
+                    await $.ui.open({ id: PANE, title: PANE_TITLE })
+                  }}>Clear</Button>
+                </Box>
+              )}
               <Box key="reveal:refresh" position="absolute" top={0} left={0} display="none" hover={{ scope: 'tip:refresh', display: 'flex' }}>
                 <Text dimColor>{tooltip}</Text>
               </Box>
@@ -1907,6 +2062,9 @@ ${card.chain}`}</Text>
             <Button key="palette" label="Palette" dimColor onPress={() => $.state.set(TAB, 'palette')}>
               ◐
             </Button>
+            <Button key="settings" label="Settings" dimColor onPress={() => $.state.set(TAB, 'settings')}>
+              ⚙
+            </Button>
           </Box>
           <Box flexGrow={1} />
           <Button key="refresh" label="Refresh" onPress={() => refresh($)}>
@@ -2052,6 +2210,73 @@ ${card.chain}`}</Text>
               </Box>
             )
           })}
+        </Box>
+      )
+    }
+
+    if (tab === 'settings') {
+      await $.state.get(SETTINGS_TICK)
+      const debugging = await debugOn($)
+      const confirming = (await $.state.get(SETTINGS_CONFIRM)).value === true
+      const workspaces = await readWorkspaces($)
+      const menu = debugMenu($)
+      const home = await homeDir($)
+      const file = home === undefined ? null : logFile(home, await $.clock.now())
+      return (
+        <Box flexDirection="column" rowGap="sm">
+          {tabBar}
+          <Box flexDirection="row" columnGap="sm">
+            <Text bold>Settings</Text>
+            <Button key="settings-close" label="Close" dimColor onPress={() => $.state.set(TAB, 'list')}>
+              Close
+            </Button>
+          </Box>
+          <Box flexDirection="column" rowGap="xs">
+            <Text weight="semibold">Debug log</Text>
+            <Box flexDirection="row" alignItems="center" columnGap="sm">
+              <Button key="debug-switch" label="Debug log" variant={debugging ? 'primary' : undefined} onPress={() => setDebug($, !debugging)}>
+                {debugging ? 'On' : 'Off'}
+              </Button>
+              <Text dimColor size="footnote">{debugging && file !== null ? file : 'Off: nothing is written.'}</Text>
+            </Box>
+            <Box flexDirection="row" alignItems="center" flexWrap="wrap" columnGap="sm">
+              <Button key="debug-export" label="Export today's log" onPress={() => menu.exportLog()}>Export</Button>
+              <Button key="debug-open" label="Open folder" onPress={() => menu.openFolder()}>Open folder</Button>
+              <Button key="debug-copy" label="Copy path" onPress={press => menu.copyPath(press.surface)}>Copy path</Button>
+              <Button key="debug-clear" label="Clear" onPress={() => $.state.set(SETTINGS_CONFIRM, true)}>Clear</Button>
+            </Box>
+            {confirming && (
+              <Box key="debug-clear-ask" flexDirection="column" borderStyle="round" borderColor={AMBER} padding="sm" rowGap="xs">
+                <Text color={AMBER}>{"Clear today's debug log? This cannot be undone."}</Text>
+                <Box flexDirection="row" columnGap="sm">
+                  <Button
+                    key="debug-clear-yes"
+                    label="Clear the log"
+                    onPress={async () => {
+                      await $.state.set(SETTINGS_CONFIRM, false)
+                      await menu.clear()
+                    }}
+                  />
+                  <Button key="debug-clear-no" label="Keep it" variant="primary" onPress={() => $.state.set(SETTINGS_CONFIRM, false)} />
+                </Box>
+              </Box>
+            )}
+          </Box>
+          <Box flexDirection="column" rowGap="xs">
+            <Box flexDirection="row" alignItems="center" columnGap="sm">
+              <Text weight="semibold">Backend per workspace</Text>
+              <Button key="backends-refresh" label="Refresh" dimColor onPress={async () => $.state.set(SETTINGS_TICK, (await $.clock.now()) + Math.random())}>
+                ↻ Refresh
+              </Button>
+            </Box>
+            {workspaces.map(row => (
+              <Box key={`workspace:${row.root}`} flexDirection="row" columnGap="sm">
+                <Text mono>{row.root}</Text>
+                <Text dimColor>{row.backend === null ? '—' : BACKEND_NAMES[row.backend]}</Text>
+                <Text color={row.source === 'Unset' ? AMBER : undefined}>{row.source}</Text>
+              </Box>
+            ))}
+          </Box>
         </Box>
       )
     }

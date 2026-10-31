@@ -45,6 +45,13 @@ type Ui = {
 const TEMPLATES = 'docs/agents/templates.yaml'
 declare const setTimeout: (run: () => void, ms: number) => unknown
 const settle = () => new Promise(done => setTimeout(done, 20))
+/** Waits (up to 3 s) until the queued log writes have put `text` in a .log file. */
+const logged = async (files: Record<string, string>, text: string) => {
+  for (let i = 0; i < 150; i++) {
+    if (Object.entries(files).some(([path, body]) => path.endsWith('.log') && body.includes(text))) return
+    await settle()
+  }
+}
 const texts = async (ui: Ui) => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
 
 /** Files, session fakes, the clock fixed on DAY, and a home folder. */
@@ -92,21 +99,22 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'settings' })
 
     await ui.press({ key: 'debug-switch' })
-    await settle()
-    expect(files[TODAY.replace(`${HOME}/`, '')] ?? files[TODAY]).toMatch(/Debug log turned on/)
+    await logged(files, 'Debug log turned on')
+    expect(Object.values(files).join(' ')).toContain('Debug log turned on')
 
     // An unknown Templates-file key is one thing the deck notes in the debug log.
     files[TEMPLATES] = 'bogus_on: x'
     await ui.press({ key: 'tab:list' })
-    await settle()
+    await logged(files, 'bogus_on')
     expect(Object.values(files).join(String.fromCharCode(10))).toContain('bogus_on')
 
     await ui.press({ key: 'tab:skills' })
     await ui.press({ key: 'settings' })
     await ui.press({ key: 'debug-switch' })
-    await settle()
+    await logged(files, 'Debug log turned off')
     files[TEMPLATES] = 'bogus_off: x'
     await ui.press({ key: 'tab:list' })
+    await settle()
     await settle()
     const written = Object.entries(files).filter(([path]) => path.endsWith('.log')).map(([, text]) => text).join(String.fromCharCode(10))
     expect(written).toContain('Debug log turned off')

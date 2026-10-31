@@ -150,7 +150,7 @@ const openSession = async ($: Engine, text: string, name: string, surface: Rende
   await $.store.set(key, [...before, { head: headOf(text), at: now }])
   try {
     const result = await $.mcp.call(SESSION_SERVER, START_SESSION, {
-      initiation: 'user_asked',
+      initiation: 'own_initiative',
       title: newTitle(name),
       prompt: text,
       background: OPENER_BACKGROUND,

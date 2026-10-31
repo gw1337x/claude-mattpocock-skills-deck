@@ -43,6 +43,10 @@ const subtrees = (value: unknown, match: (key: string) => boolean, found: Node[]
 export const cardTexts = async (ui: object): Promise<string[]> =>
   subtrees(await asDrawn(ui).drawn(), key => key.startsWith('card:')).map(textOf)
 
+/** The whole text of each Box whose key starts with `prefix`, in the order drawn. */
+export const boxTexts = async (ui: object, prefix: string): Promise<string[]> =>
+  subtrees(await asDrawn(ui).drawn(), key => key.startsWith(prefix)).map(textOf)
+
 /** The List's count bar as numbers. */
 export const listCounts = async (ui: object) => {
   const [bar] = subtrees(await asDrawn(ui).drawn(), key => key === 'counts')

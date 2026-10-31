@@ -1354,7 +1354,7 @@ export const register: Register = on => {
                   {content}
                 </Box>
               )
-              // A Button holds only strings and Text, so the row is a Box of fixed-width cells, each cell a Button that opens the ticket.
+              // A Button holds only strings and Text, so the row is a Box of fixed-width cells, each cell a Button that opens the ticket (no label: a desktop would draw it in place of the cell's text).
               const open = async () => {
                 if (found === undefined) return
                 await $.state.set(TAB, 'list')
@@ -1366,11 +1366,6 @@ export const register: Register = on => {
                   column,
                   <Button
                     key={column === 'Title' ? `route:${index}` : `route:${index}:${column}:open`}
-                    label={
-                      column === 'Title'
-                        ? `route row ${who} · ${entry.ticketKey} · ${entry.title} · ${actionWord(entry.action)}${mark} · ${state} · ${when}`
-                        : `route ${column} ${entry.ticketKey}`
-                    }
                     plain
                     onPress={open}
                   >

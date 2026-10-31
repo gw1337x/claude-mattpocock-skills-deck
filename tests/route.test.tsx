@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { buttonLabels } from './board-text'
+import { boxTexts, buttonLabels } from './board-text'
 import { serveFiles } from './serve-files'
 
 const BAND = {
@@ -193,7 +193,7 @@ for (const surface of SURFACES) {
     const shown = await everything(band)
     for (const column of ['Session', 'Ticket', 'Title', 'Action', 'State', 'When']) expect(shown).toContain(column)
 
-    const rows = (await buttonLabels(band)).filter(t => /^route row/.test(t))
+    const rows = await boxTexts(band, 'route-row:')
     expect(rows).toHaveLength(3)
     expect(rows[0]).toContain('Prototype the card form')
     expect(rows[0]).toContain('reported')

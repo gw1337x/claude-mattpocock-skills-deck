@@ -54,6 +54,18 @@ export type Check = {
   fix: string
 }
 
+/** One Suggestion pill, as the model passed it to suggest_next_steps. */
+export type Suggestion = {
+  /** The pill's text, at most 10 characters. */
+  intro: string
+  /** What picking the pill puts in the box. */
+  prompt: string
+  /** Why this step; shown on hover. */
+  reason: string
+  /** 0-10; the hover shows it as the score, and the pills are drawn highest first. */
+  priority: number
+}
+
 export type BoardFilter = 'all' | 'open' | 'closed' | 'blocked' | 'ready'
 export type BoardSort = 'updated' | 'created' | 'number' | 'title'
 
@@ -97,6 +109,8 @@ declare module 'claude-code' {
       deckRenaming: boolean
       /** True once the person renamed the session themselves; the deck then never retitles it. */
       personTitled: boolean
+      /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */
+      suggestions: { items: Suggestion[]; at: number } | null
     }
   }
 }

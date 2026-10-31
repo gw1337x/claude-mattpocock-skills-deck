@@ -55,6 +55,7 @@ import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from 
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
+import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
@@ -125,6 +126,7 @@ const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
 const BAND_COLLAPSED = { plugin: 'mattpocock-skills-deck', key: 'bandCollapsed' } as const
+const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
   try {
@@ -420,6 +422,23 @@ const clockTime = (ms: number): string => {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
 }
 
+/** True when the person asked Claude Code for reduced motion; an unreadable setting counts as not. */
+const reducedMotion = async ($: Engine): Promise<boolean> => {
+  try {
+    return (await $.settings.read({ key: 'prefersReducedMotion' })) === true
+  } catch {
+    return false
+  }
+}
+
+/** DSH's bubble entry: three bubbles rise and fade once, ending invisible, so a late redraw shows nothing. */
+const ENTRY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16" viewBox="0 0 24 16">${[4, 12, 20]
+  .map(
+    (x, i) =>
+      `<circle cx="${x}" cy="14" r="2.5" fill="${DSH.map}" opacity="0"><animate attributeName="cy" values="14;2" begin="${i * 0.3}s" dur="1.4s" fill="freeze"/><animate attributeName="opacity" values="0;1;0" begin="${i * 0.3}s" dur="1.4s" fill="freeze"/></circle>`,
+  )
+  .join('')}</svg>`
+
 const FILTERS: [BoardFilter, string][] = [
   ['all', 'All'],
   ['open', 'Open'],
@@ -491,8 +510,21 @@ export const register: Register = on => {
       description: 'Open the Skills Deck list beside the chat',
     })
     for (const tool of ALL_DECK_TOOLS) await $.tool.register(tool)
+    await $.tool.register(SUGGEST_TOOL)
 
     return next(e)
+  })
+
+  // The next reply's pills replace these; until then they stay where the person can pick one.
+  on('tool.call', { tool: `mcp__mattpocock-skills-deck__${SUGGEST_TOOL.name}` }, async ($, e) => {
+    try {
+      const items = suggestionsOf(e)
+      await $.state.set(SUGGESTIONS, { items, at: await $.clock.now() })
+      return { result: `Showing ${items.length} Suggestion pills above the input.` }
+    } catch (error) {
+      if (error instanceof DeckRefusal) return { deny: error.message }
+      throw error
+    }
   })
 
   for (const tool of ALL_DECK_TOOLS) {
@@ -521,6 +553,8 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     const result = await next(e)
     if (result.text !== undefined && !e.command && e.origin.kind === 'composer') await holdTitle($, result.text)
+    // The pills answered the last reply; the one this message starts, from wherever it came, brings its own.
+    if (result.text !== undefined) await $.state.set(SUGGESTIONS, null)
     return result
   })
 
@@ -557,7 +591,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
+    const Svg = 'Svg' in elements ? elements.Svg : undefined
     const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, await resolveBackend($)))
     const { ready, bugs, needsTriage } = derive(snapshot.items).counts
     const menuOpen = (await $.state.get(SKILLS_MENU)).value ?? false
@@ -578,6 +614,10 @@ export const register: Register = on => {
     const envColor = env === null ? GREY_INK : env.passed === env.total ? GREEN : AMBER
     // DSH turns the time red once the snapshot is stale.
     const stale = now - snapshot.readAt > STALE_MS
+    // Pills follow a finished reply: the model calls the tool as its last step, so they wait for the turn to end.
+    const suggestions = e.props.isWorking ? null : ((await $.state.get(SUGGESTIONS)).value ?? null)
+    // The entry animation plays only while the pills are new, and never for someone who asked for reduced motion.
+    const entering = Svg !== undefined && suggestions !== null && now - suggestions.at < ENTRY_MS && !(await reducedMotion($))
 
     /** One control of the status bar: an icon, a word and a count, all in one colour, named by `label`. */
     const item = (key: string, label: string, color: string, onPress: () => unknown, icon: string, word?: string, count?: number) => (
@@ -644,6 +684,51 @@ export const register: Register = on => {
                 <Button key={`band-skill:${skill.name}`} label={`/${skill.name}`} onPress={() => fillPrompt($, `/${skill.name}`)}>
                   <Text mono>{`/${skill.name}`}</Text>
                 </Button>
+              ))}
+            </Box>
+          </Box>
+        )}
+        {suggestions !== null && (
+          <Box key="suggestions" flexDirection="column" flexShrink={0} rowGap="xs">
+            <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs">
+              {entering && Svg && <Svg source={ENTRY_SVG} alt="New suggestions" width={24} height={16} />}
+              {suggestions.items.map((suggestion, index) => (
+                <Box
+                  key={`suggest-pill:${index}`}
+                  borderStyle="round"
+                  borderColor={DSH.border}
+                  paddingX="sm"
+                  hover={{ scope: `suggest:${index}`, borderColor: PURPLE }}
+                >
+                  <Button
+                    key={`suggest:${index}`}
+                    label={`Suggestion: ${suggestion.intro}`}
+                    plain
+                    onPress={() => fillPrompt($, pillPrompt(suggestion))}
+                  >
+                    <Text color={DSH.text}>{suggestion.intro}</Text>
+                  </Button>
+                </Box>
+              ))}
+              <Button key="suggest-close" label="Close (choosing none)" plain onPress={() => $.state.set(SUGGESTIONS, null)}>
+                <Text color={GREY_INK}>✕</Text>
+              </Button>
+            </Box>
+            {/* One fixed row the hovered pill's reason swaps into, so a hover never moves the band. */}
+            <Box key="suggest-reasons" position="relative" height={1}>
+              {suggestions.items.map((suggestion, index) => (
+                <Box
+                  key={`suggest-reason:${index}`}
+                  position="absolute"
+                  top={0}
+                  left={0}
+                  columnGap="sm"
+                  display="none"
+                  hover={{ scope: `suggest:${index}`, display: 'flex' }}
+                >
+                  <Text color={PURPLE} weight="semibold" tabular>{`Score ${suggestion.priority}/10`}</Text>
+                  <Text dimColor>{suggestion.reason}</Text>
+                </Box>
               ))}
             </Box>
           </Box>

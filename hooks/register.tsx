@@ -64,7 +64,7 @@ import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from 
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
-import { blockersOf, changedRows, clampTitle, closedFold, COPIED_MS, flashOf, foldLabels, type Flash } from './rows'
+import { blockersOf, changedRows, clampTitle, closedFold, COPIED_MS, commentsPage, flashOf, foldLabels, type Flash } from './rows'
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
@@ -200,6 +200,7 @@ const CLOSED_PAGES = { plugin: 'mattpocock-skills-deck', key: 'closedPages' } as
 const CLOSED_OPEN = { plugin: 'mattpocock-skills-deck', key: 'closedOpen' } as const
 const ROW_LABELS = { plugin: 'mattpocock-skills-deck', key: 'rowLabels' } as const
 const COPIED = { plugin: 'mattpocock-skills-deck', key: 'copied' } as const
+const COMMENT_PAGES = { plugin: 'mattpocock-skills-deck', key: 'commentPages' } as const
 const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
@@ -1327,6 +1328,8 @@ ${card.chain}`}</Text>
       } else {
         await $.fs.write(item.path, appendComment(await $.fs.read(item.path), comment, new Date(await $.clock.now())))
       }
+      // The new comment is last, so show every page.
+      await $.state.set(COMMENT_PAGES, { path: item.path, pages: Number.MAX_SAFE_INTEGER })
       await refresh($)
     }
     const switchBackend = async (chosen: Backend) => {
@@ -1607,14 +1610,47 @@ ${card.chain}`}</Text>
         number,
         item: items.find(item => item.feature === ticket.feature && item.number === number),
       }))
+      const parent = ticket.parent === null ? undefined : items.find(item => item.path === ticket.parent)
+      const subTickets = childrenOf(items, ticket.path).sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity))
+      const taken = (await $.state.get(COMMENT_PAGES)).value ?? null
+      const page = commentsPage(comments, taken?.path === ticket.path ? taken.pages : 0)
+      const mark = copied !== null && copied.path === ticket.path && rowNow - copied.at < COPIED_MS ? (copied.ok ? '✓' : '×') : '⧉'
+      const itemLabel = (item: BoardItem) => (item.number === null ? item.title : `#${item.number} ${item.title}`)
       return (
         <Box flexDirection="column">
-          <Button key="back" label="Back" onPress={() => showDetail(null)} />
+          <Box flexDirection="row" alignItems="center" columnGap="xs">
+            <Button key="back" label="Back" onPress={() => showDetail(null)} />
+            {renderAction(ticket, items)}
+            <Button key={`copy:${ticket.path}`} label="Copy link" dimColor onPress={press => copyLink(ticket, press.surface)}>
+              <Text dimColor={mark === '⧉'} color={mark === '✓' ? DSH.ok : mark === '×' ? DSH.bad : undefined}>
+                {mark}
+              </Text>
+            </Button>
+            <Link href={ticket.url ?? ticket.path}>↗</Link>
+            {renderOpen(ticket, items)}
+          </Box>
           <Text bold>{`${KIND_NAMES[ticket.kind]}: ${ticket.title}`}</Text>
           <Text>{cardLine(ticket)}</Text>
-          <Box flexDirection="row" columnGap="xs">{renderAction(ticket, items)}{renderOpen(ticket, items)}</Box>
           {ticket.warning && <Text dimColor>{ticket.warning}</Text>}
           {unreadable ? <Text dimColor>{problem}</Text> : <Markdown text={body} />}
+          {parent && (
+            <Box key="parent" flexDirection="column">
+              <Text bold>Parent</Text>
+              <Button
+                key={`parent:${parent.path}`}
+                label={`${KIND_NAMES[parent.kind]}: ${parent.title}`}
+                onPress={() => showDetail(parent.path)}
+              />
+            </Box>
+          )}
+          {subTickets.length > 0 && (
+            <Box key="sub-tickets" flexDirection="column">
+              <Text bold>Sub-tickets</Text>
+              {subTickets.map(item => (
+                <Button key={`sub:${item.path}`} label={itemLabel(item)} onPress={() => showDetail(item.path)} />
+              ))}
+            </Box>
+          )}
           <Text bold>Blocked by</Text>
           {blockers.length === 0 && <Text dimColor>None</Text>}
           {blockers.map(({ number, item }) =>
@@ -1629,17 +1665,25 @@ ${card.chain}`}</Text>
             ),
           )}
           <Text bold>{`Comments (${comments.length})`}</Text>
-          {comments.map((comment, index) => (
+          {page.shown.map((comment, index) => (
             <Markdown key={`comment:${index}`} text={comment} />
           ))}
+          {page.next > 0 && (
+            <Button
+              key="comments-more"
+              label={`Load next ${page.next}`}
+              onPress={() => $.state.set(COMMENT_PAGES, { path: ticket.path, pages: page.pages + 1 })}
+            />
+          )}
           {readOnly && <Text dimColor>You have read-only access to this repo, so comments are disabled.</Text>}
           {Input && !unreadable && !readOnly && (
             <Input
               key="comment"
               label="Comment"
-              placeholder="Write a comment"
+              placeholder="Write a comment — Markdown supported (Cmd/Ctrl+Enter to send)"
+              rows={4}
               value=""
-              submitLabel="post"
+              submitLabel="send"
               onSubmit={(value: string) => postComment(ticket, value)}
             />
           )}

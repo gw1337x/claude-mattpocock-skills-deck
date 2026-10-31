@@ -1,4 +1,4 @@
-import type { Hook, Register } from 'claude-code'
+import type { Hook, Register, RenderSurface } from 'claude-code'
 
 import type { Backend, BoardFilter, BoardItem, BoardSnapshot, BoardSort, BoardView } from '../types'
 import {
@@ -9,7 +9,7 @@ import {
   CONSOLIDATE_PROMPT,
   fill,
   HANDOFF_PROMPT,
-  HEALTH_CHECK_PROMPT,
+  healthCheckPrompt,
   NEW_MAP_PROMPT,
   NEW_SPEC_PROMPT,
   progressOf,
@@ -61,6 +61,7 @@ import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyO
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
+import { claim, newTitle, OPENER_BACKGROUND, SESSION_SERVER, START_SESSION, stillOpen, type Opened } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
@@ -71,6 +72,7 @@ const FILLED = { plugin: 'mattpocock-skills-deck', key: 'filled' } as const
 const PENDING_TITLE = { plugin: 'mattpocock-skills-deck', key: 'pendingTitle' } as const
 const DECK_RENAMING = { plugin: 'mattpocock-skills-deck', key: 'deckRenaming' } as const
 const PERSON_TITLED = { plugin: 'mattpocock-skills-deck', key: 'personTitled' } as const
+const OPENED_BY_DECK = { plugin: 'mattpocock-skills-deck', key: 'openedByDeck' } as const
 
 /** The templates file's overrides, read fresh each time so removing one restores DSH's text; none when it is absent. */
 const readOverrides = async ($: Engine): Promise<Overrides> =>
@@ -131,6 +133,45 @@ const applyTitle = async ($: Engine) => {
   } finally {
     await $.state.set(DECK_RENAMING, false)
   }
+}
+
+/** Sessions the deck opened that have not had their first message yet, shared across sessions in this repo. */
+const openedKey = async ($: Engine) => `opened:${await repoKey($)}`
+
+/**
+ * Runs a prompt in a new session titled `[New] …`. When Desktop cannot open one (no session server, or it refuses),
+ * the prompt goes in the box and on the clipboard, with a toast saying so.
+ */
+const openSession = async ($: Engine, text: string, name: string, surface: RenderSurface, fallbackTitle?: string | null) => {
+  try {
+    const result = await $.mcp.call(SESSION_SERVER, START_SESSION, {
+      initiation: 'user_asked',
+      title: newTitle(name),
+      prompt: text,
+      background: OPENER_BACKGROUND,
+      context: 'fresh',
+    })
+    if (result.isError) throw new Error('the session server refused')
+  } catch (error) {
+    debugNote(`Could not open a new session: ${error instanceof Error ? error.message : String(error)}`)
+    await fillPrompt($, text, fallbackTitle)
+    await $.ui.copy({ text, surface })
+    $.ui.toast('Could not open a new session here: the prompt is in the box and copied.')
+    return
+  }
+  const now = await $.clock.now()
+  const key = await openedKey($)
+  await $.store.set(key, [...stillOpen(await $.store.get(key), now), { head: headOf(text), at: now }])
+}
+
+/** Marks this session as one the deck opened when its first message is the prompt the deck sent. */
+const claimOpened = async ($: Engine, sent: string) => {
+  const key = await openedKey($)
+  const records = stillOpen(await $.store.get(key), await $.clock.now())
+  const { claimed, rest } = claim(records, headOf(sent))
+  if (!claimed) return
+  await $.store.set(key, rest)
+  await $.state.set(OPENED_BY_DECK, true)
 }
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const
@@ -299,6 +340,11 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
     const key = keyOf(found.backend, item)
     if (released) await dropFromRoute($, found.backend, key)
     else {
+      // The first ticket a deck-opened session reports gives it its [#n] title; a person's own name is checked at the rename.
+      if ((await $.state.get(OPENED_BY_DECK)).value) {
+        await $.state.set(OPENED_BY_DECK, false)
+        await $.state.set(PENDING_TITLE, titleFor(item))
+      }
       const entry = entryFor(found.backend, item, 'report', 'reported', await $.clock.now())
       await addToRoute($, found.backend, note === undefined ? entry : { ...entry, note })
     }
@@ -597,6 +643,13 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     const result = await next(e)
     if (result.text !== undefined && !e.command && e.origin.kind === 'composer') await holdTitle($, result.text)
+    if (result.text !== undefined && !e.command) {
+      try {
+        await claimOpened($, result.text)
+      } catch {
+        // Not knowing a session was opened by the deck only costs it the [#n] rename.
+      }
+    }
     // The pills answered the last reply; the one this message starts, from wherever it came, brings its own.
     if (result.text !== undefined) await $.state.set(SUGGESTIONS, null)
     return result
@@ -963,6 +1016,20 @@ export const register: Register = on => {
         </Button>
       ) : null
     }
+    /** The # button: the same Action prompt, run in a new session. */
+    const renderOpen = (item: BoardItem, all: BoardItem[]) => {
+      const action = actionOf(item, all)
+      return action ? (
+        <Button
+          key={`open:${item.path}`}
+          label="Run in a new session"
+          dimColor
+          onPress={press => openSession($, action.prompt, item.title, press.surface, titleFor(item))}
+        >
+          #
+        </Button>
+      ) : null
+    }
     const Svg = 'Svg' in elements ? elements.Svg : undefined
     /** One item as DSH draws it: a bordered card in its Kind's colour, title row over labels and controls. */
     const renderCard = (item: BoardItem, all: BoardItem[], derived: Derived) => {
@@ -1000,6 +1067,7 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
               {renderAction(item, all)}
+              {renderOpen(item, all)}
               <Button
                 key={`copy:${item.path}`}
                 label="Copy link"
@@ -1246,7 +1314,7 @@ export const register: Register = on => {
           <Text bold>{`${KIND_NAMES[container.kind]}: ${container.title}`}</Text>
           <Text>{`${total} tickets · ${openCount} open · ${closedCount} closed`}</Text>
           <Text>{progressBar(percent)}</Text>
-          <Box>{renderAction(container, items)}</Box>
+          <Box flexDirection="row" columnGap="xs">{renderAction(container, items)}{renderOpen(container, items)}</Box>
           {children.map(child => renderCard(child, items, derivedItems))}
         </Box>
       )
@@ -1278,7 +1346,7 @@ export const register: Register = on => {
           <Button key="back" label="Back" onPress={() => showDetail(null)} />
           <Text bold>{`${KIND_NAMES[ticket.kind]}: ${ticket.title}`}</Text>
           <Text>{cardLine(ticket)}</Text>
-          <Box>{renderAction(ticket, items)}</Box>
+          <Box flexDirection="row" columnGap="xs">{renderAction(ticket, items)}{renderOpen(ticket, items)}</Box>
           {ticket.warning && <Text dimColor>{ticket.warning}</Text>}
           {unreadable ? <Text dimColor>{problem}</Text> : <Markdown text={body} />}
           <Text bold>Blocked by</Text>
@@ -1334,7 +1402,7 @@ export const register: Register = on => {
             <Text dimColor>{`${STATUS_STYLES.closed.icon} ${closed} Closed`}</Text>
           </Box>
           <Box flexDirection="row" alignItems="center" columnGap="xs">
-            <Button key="health" label="Health check" onPress={() => fillPrompt($, HEALTH_CHECK_PROMPT)}>
+            <Button key="health" label="Health check" onPress={press => openSession($, healthCheckPrompt(backend), 'Health check', press.surface)}>
               ♥ Health check
             </Button>
             <Button key="refresh" label="Refresh" onPress={() => refresh($)}>

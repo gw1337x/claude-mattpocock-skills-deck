@@ -273,6 +273,44 @@ ${TOOLS}`,
 - [ ] Map-level items (e.g. Destination/Fog adjustments) → still write them in the chosen place, and mark the item "map-level, migrate when the map is built"
 
 ${TOOLS}`,
+  healthCheck: `## Health check (put orphaned open tickets where they belong)
+
+This health check covers **every open ticket in the whole repository** (it does not follow the current panel filters): find the orphaned ones, and hand me a suggestion list — act only after I nod.
+
+### 1. What counts as orphaned
+
+All three structural facts must hold: **the ticket is not closed**, **the ticket is not itself a map**, and **the ticket has no parent** (it is not a sub-ticket of any map — the same rule the list uses for the "standalone ticket" display).
+
+**Do not exclude by label**: tickets marked as waiting for a human, or marked as not planned, still count as orphaned. Labels are only used to group the report.
+
+On top of that, judge each orphaned ticket with one sentence — "is this clearly something a single ticket can finish?" If yes, you may also leave it alone: do not attach it to a map, keep it where it is, and just log one line with the reason in the report.
+
+### 2. Only two structural actions
+
+1. Create a native sub-ticket edge: attach the ticket under a suitable map.
+2. Open a new map, for a ticket the human has nodded on.
+
+**Never touch**: closed tickets, any ticket title or body, labels and claim state, other repositories; do not close any ticket, delete comments, change source code, publish a release, or commit. Anything in the list that would touch one of those is not done — it goes into the suggestions for a human instead.
+
+### 3. Deliverable: a suggestion list first — act only after the human nods
+
+The list must state each conclusion:
+
+- this ticket → attach under which map + a one-sentence reason;
+- this ticket → suggest a new map of its own + a one-sentence reason;
+- this ticket → suggest leaving it where it is + a one-sentence reason.
+
+Then stop and wait for the nod. **Do not automatically write comments on tickets**: the native edges left by the structural actions are the record.
+
+### 4. How to pick the map
+
+Read each map Destination and Notes yourself and group by meaning, giving "attach under this one + a one-sentence reason". **If no single map is clearly right, list 2 to 3 candidates for the human to choose — do not force one**; if no map can hold it, suggest a new map per section 3 (write only the minimal Destination draft, let the maintainer or owner fill in the body, no count threshold); if even that does not hold up, suggest leaving it where it is and state why.
+
+### 5. The subject of this backend
+
+{subject}
+
+${TOOLS}`,
   handoff1: `/handoff Create a handoff doc from this session, written to .scratch/handoff/{ts}-<short>.md (relative to the current working directory). <short> is a brief title you give this handoff (zh ≤10 chars / en ≤20 chars, in the current session language, use hyphen or underscore instead of spaces) so a human can tell at a glance what it is about.
 
 This doc is for an agent with no memory of this session — write from its perspective, so it can continue seamlessly without guessing or revisiting this session. Approach from first principles.`,

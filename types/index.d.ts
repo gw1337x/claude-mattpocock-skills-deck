@@ -109,6 +109,8 @@ declare module 'claude-code' {
       deckRenaming: boolean
       /** True once the person renamed the session themselves; the deck then never retitles it. */
       personTitled: boolean
+      /** True in a session the deck opened, until its first reported ticket gives it a [#n] title. */
+      openedByDeck: boolean
       /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */
       suggestions: { items: Suggestion[]; at: number } | null
     }

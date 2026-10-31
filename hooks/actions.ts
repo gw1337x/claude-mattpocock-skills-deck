@@ -126,10 +126,38 @@ export const containerAction = (
   return actionFor(container, overrides, note)
 }
 
-export const HEALTH_CHECK_PROMPT =
-  'Health-check the tracker: find orphaned or broken tickets (missing parents, dangling Blocked-by links, ' +
-  'files that do not parse, labels that contradict state) and propose a fix for each. ' +
-  'Change nothing until I give my approval.'
+/** DSH's GitHub `{subject}`; its last sentence was cut off in the reference, so it is completed from the zh text. */
+const HEALTH_SUBJECT_GITHUB = `**On this backend, counting and acting both go through the tools** (the three rules from the general section stay as they are).
+
+Counting: use deck_context for the current backend and repo; read each map's child list with deck_map_snapshot (anything appearing in any list is not orphaned).
+
+Attaching: use deck_map_link with parentKey to attach a ticket under the chosen map (the tool owns the native sub-ticket edge and its read-back check). {subIssue}
+
+Blocking: use deck_map_link with blockedBy, passing the numbers of the tickets that block it; the tool lands the edge the way this backend does and says which column it used (landing is only claimed when the read-back after the write shows the edge; when it cannot be read back the tool says it is unconfirmed rather than claiming it landed).
+
+Group the report by label and suggestion type, but the health check always covers all open tickets and does not follow the panel's current filters.`
+
+/** DSH's Markdown `{subject}`. */
+const HEALTH_SUBJECT_MARKDOWN = `**On this backend a ticket is a file in this workspace** (one directory per work unit, the map written as map.md and each ticket as a file), so "orphaned" has to land on files. **Check two file-level criteria**:
+1. a ticket file exists but no map.md list references it — it is floating outside;
+2. a map.md list references a ticket whose file does not exist — a broken link.
+
+**One AI judgement on the same rules**: for each ticket, judge with one sentence — "is this clearly something a single ticket can finish?" If yes, you may also leave it alone and just log one line.
+
+**All three conclusions** (attach under a map / suggest a new map of its own / suggest leaving it where it is + a one-sentence reason) only go into the suggestion list — act only after the human nods.
+
+**Never touch**: closed tickets, any ticket title or body, labels and claim state, other repositories; do not close tickets, change source code, or commit.
+
+The health check covers every ticket file in this workspace and does not follow the current panel filters.`
+
+/** DSH's `healthCheck`, with the Backend's subject (and its `{subIssue}`) filled in. */
+export const healthCheckPrompt = (backend: 'github' | 'markdown'): string => {
+  const github = backend === 'github'
+  const subject = fill(github ? HEALTH_SUBJECT_GITHUB : HEALTH_SUBJECT_MARKDOWN, {
+    subIssue: github ? SUB_ISSUE_GITHUB : SUB_ISSUE_MARKDOWN,
+  })
+  return fill(TEMPLATES.healthCheck, { subject })
+}
 
 export const NEW_MAP_PROMPT =
   '/wayfinder\n\nStart a new Map: ask me what I am trying to explore, then lay out its Notes, Decisions so far and Fog.'

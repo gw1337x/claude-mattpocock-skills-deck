@@ -42,6 +42,7 @@ import {
   postGithubComment,
   readGithubDetail,
   readGithubItems,
+  readGithubRest,
   type Run,
 } from './github-tracker'
 import {
@@ -63,6 +64,7 @@ import { CATALOGUE, GROUP_NAMES, GROUPS, installedMattSkills, skillFiles } from 
 import { DECK_WRITES, DECK_WRITE_TOOLS } from './deck-writes'
 import { GITHUB_WRITES } from './github-write'
 import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyOf, NO_BACKEND, type DeckTracker, type FoundBackend } from './deck-tools'
+import { blockersOf, changedRows, clampTitle, closedFold, COPIED_MS, flashOf, foldLabels, type Flash } from './rows'
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
@@ -193,6 +195,12 @@ const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as con
 const SUGGESTIONS = { plugin: 'mattpocock-skills-deck', key: 'suggestions' } as const
 const ENTRY_FLOW = { plugin: 'mattpocock-skills-deck', key: 'entryFlow' } as const
 const LABELS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'labelsOpen' } as const
+const FLASH = { plugin: 'mattpocock-skills-deck', key: 'flash' } as const
+const CLOSED_PAGES = { plugin: 'mattpocock-skills-deck', key: 'closedPages' } as const
+const CLOSED_OPEN = { plugin: 'mattpocock-skills-deck', key: 'closedOpen' } as const
+const ROW_LABELS = { plugin: 'mattpocock-skills-deck', key: 'rowLabels' } as const
+const COPIED = { plugin: 'mattpocock-skills-deck', key: 'copied' } as const
+const REST_HIDDEN = { plugin: 'mattpocock-skills-deck', key: 'restHidden' } as const
 const REFRESHING ={ plugin: 'mattpocock-skills-deck', key: 'refreshing' } as const
 
 const repoKey = async ($: Engine): Promise<string> => {
@@ -308,15 +316,25 @@ const failedSnapshot = async ($: Engine, error: GhError, previous?: BoardSnapsho
 /** Reads the tracker now; nothing is stored, so a render may call it. A `gh` failure becomes the snapshot's error. */
 const readBoard = async ($: Engine, backend: Backend): Promise<BoardSnapshot> => {
   try {
+    if (backend === 'github') {
+      try {
+        return { items: await readGithubItems(ghRun($)), readAt: await $.clock.now() }
+      } catch (error) {
+        // DSH falls back to REST when GraphQL breaks; a login or rate-limit problem would break REST too.
+        if (!(error instanceof GhError) || error.kind !== 'other') throw error
+        try {
+          return { items: await readGithubRest(ghRun($)), readAt: await $.clock.now(), restFallback: true }
+        } catch {
+          throw error
+        }
+      }
+    }
     // `$.fs` cannot be passed as a value; each call is spelled out.
-    const items =
-      backend === 'github'
-        ? await readGithubItems(ghRun($))
-        : await readMarkdownItems({
-            read: path => $.fs.read(path),
-            list: path => $.fs.list(path),
-            exists: path => $.fs.exists(path),
-          })
+    const items = await readMarkdownItems({
+      read: path => $.fs.read(path),
+      list: path => $.fs.list(path),
+      exists: path => $.fs.exists(path),
+    })
     return { items, readAt: await $.clock.now() }
   } catch (error) {
     if (error instanceof GhError) return failedSnapshot($, error)
@@ -395,7 +413,14 @@ const refresh = async ($: Engine) => {
   await $.state.set(REFRESHING, true)
   try {
     const backend = await resolveBackend($)
-    await $.state.set(SNAPSHOT, await readBoard($, backend))
+    const before = (await $.state.get(SNAPSHOT)).value
+    const next = await readBoard($, backend)
+    await $.state.set(SNAPSHOT, next)
+    // Only rows that differ from the last good read flash; a failed read or the first read flashes nothing.
+    if (next.error === undefined) {
+      const found = changedRows(before?.error === undefined ? before?.items : undefined, next.items)
+      await $.state.set(FLASH, found.changed.length + found.added.length > 0 ? { ...found, at: await $.clock.now() } : null)
+    }
     await $.state.set(ENV_CHECKS, await runEnvChecks($, backend))
   } catch {
     // An unreadable tracker keeps the last snapshot; it must not block a turn or the Pane opening.
@@ -1199,50 +1224,84 @@ ${card.chain}`}</Text>
       ) : null
     }
     const Svg = 'Svg' in elements ? elements.Svg : undefined
-    /** One item as DSH draws it: a bordered card in its Kind's colour, title row over labels and controls. */
+    const flash: Flash | null = (await $.state.get(FLASH)).value ?? null
+    const rowNow = await $.clock.now()
+    const copied = (await $.state.get(COPIED)).value ?? null
+    const expanded = (await $.state.get(ROW_LABELS)).value ?? []
+    const paneColumns = e.props.bodyColumns
+    const copyLink = async (item: BoardItem, surface: RenderSurface) => {
+      let ok = true
+      try {
+        ok = (await $.ui.copy({ text: item.url ?? item.path, surface })).isCopied !== false
+      } catch {
+        ok = false
+      }
+      await $.state.set(COPIED, { path: item.path, ok, at: await $.clock.now() })
+    }
+    /** One item as DSH draws it: a bordered card in its Kind's colour; ID and title over the chips, labels and controls. */
     const renderCard = (item: BoardItem, all: BoardItem[], derived: Derived) => {
       const kind = KIND_STYLES[item.kind]
       const number = numberText(item)
       const status = statusOf(item, derived)
-      const progress = isContainer(item) ? progressOf(childrenOf(all, item.path)) : null
+      const container = isContainer(item)
+      const progress = container ? progressOf(childrenOf(all, item.path)) : null
       const closed = status === 'closed'
+      const flashing = flashOf(flash, item.path, rowNow)
+      const blockers = status === 'blocked' ? blockersOf(item, all) : []
+      const parent = item.parent === null ? undefined : all.find(each => each.path === item.parent)
+      const { shown, hidden } = expanded.includes(item.path)
+        ? { shown: item.labels, hidden: 0 }
+        : foldLabels(item.labels, Math.max(20, Math.floor(paneColumns / 2)))
+      const mark = copied !== null && copied.path === item.path && rowNow - copied.at < COPIED_MS ? (copied.ok ? '✓' : '×') : '⧉'
       return (
         <Box
           key={`card:${item.path}`}
           flexDirection="column"
           flexShrink={0}
           borderStyle="round"
-          borderColor={closed ? DSH.borderQuiet : kind.color}
+          borderColor={flashing === 'added' ? DSH.ok : flashing === 'changed' ? DSH.warn : closed ? DSH.borderQuiet : kind.color}
           padding="sm"
           rowGap="xs"
           hover={{ borderColor: DSH.text }}
         >
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap="sm">
             <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="sm" flexShrink={1}>
-              <Text color={kind.color} size="footnote" weight="semibold">{`${kind.icon} ${kind.name}`}</Text>
-              {number && <Text color={kind.color} size="footnote" mono>{number}</Text>}
+              {number && <Text key={`id:${item.path}`} color={kind.color} size="footnote" weight="semibold" mono>{number}</Text>}
+              {container && <Text key={`container:${item.path}`} color={kind.color} size="footnote" weight="semibold">{`${kind.icon} ${kind.name}`}</Text>}
               <Button key={`detail:${item.path}`} label={item.title} plain onPress={() => showDetail(item.path)}>
-                <Text weight="semibold" dimColor={closed}>{item.title}</Text>
+                <Text weight="semibold" dimColor={closed}>{clampTitle(item.title, paneColumns - 12)}</Text>
               </Button>
             </Box>
-            {progress
-              ? progressMark(elements, Svg, progress.closed, progress.total, kind.color)
-              : statusTag(elements, status)}
+            {progress && progressMark(elements, Svg, progress.closed, progress.total, kind.color)}
           </Box>
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" columnGap="sm">
-            <Box flexDirection="row" flexWrap="wrap" columnGap="xs" rowGap="xs" flexShrink={1}>
-              {item.labels.map(label => labelPill(elements, colors, label, `label:${item.path}:${label}`))}
+            <Box flexDirection="row" flexWrap="wrap" alignItems="center" columnGap="xs" rowGap="xs" flexShrink={1}>
+              {!container && <Text key={`type:${item.path}`} color={kind.color} size="footnote" weight="medium">{`${kind.icon} ${kind.name}`}</Text>}
+              {shown.map(label => labelPill(elements, colors, label, `label:${item.path}:${label}`))}
+              {hidden > 0 && (
+                <Button key={`more:${item.path}`} label={`${hidden} more labels`} dimColor onPress={() => $.state.set(ROW_LABELS, [...expanded, item.path])}>
+                  <Text size="footnote">{`+${hidden}`}</Text>
+                </Button>
+              )}
+              {status === 'blocked' && (
+                <Button key={`blocked:${item.path}`} label="Blocked" onPress={() => showDetail((parent ?? item).path)}>
+                  <Text color={STATUS_STYLES.blocked.color} size="footnote" weight="medium">
+                    {blockers.length === 0
+                      ? `${STATUS_STYLES.blocked.icon} Blocked`
+                      : `${STATUS_STYLES.blocked.icon} Blocked by ${blockers.map(each => `#${each.number}`).join(', ')}`}
+                  </Text>
+                </Button>
+              )}
+              {closed && <Text key={`closed:${item.path}`} color={STATUS_STYLES.closed.color} size="footnote" weight="medium">{`${STATUS_STYLES.closed.icon} Closed`}</Text>}
+              {!closed && status !== 'blocked' && statusTag(elements, status)}
             </Box>
             <Box flexDirection="row" alignItems="center" columnGap="xs" flexShrink={0}>
               {renderAction(item, all)}
               {renderOpen(item, all)}
-              <Button
-                key={`copy:${item.path}`}
-                label="Copy link"
-                dimColor
-                onPress={press => $.ui.copy({ text: item.url ?? item.path, surface: press.surface })}
-              >
-                ⧉
+              <Button key={`copy:${item.path}`} label="Copy link" dimColor onPress={press => copyLink(item, press.surface)}>
+                <Text dimColor={mark === '⧉'} color={mark === '✓' ? DSH.ok : mark === '×' ? DSH.bad : undefined}>
+                  {mark}
+                </Text>
               </Button>
               <Link href={item.url ?? item.path}>↗</Link>
             </Box>
@@ -1590,6 +1649,14 @@ ${card.chain}`}</Text>
 
     const { ready, blocked, closed } = derivedItems.counts
     const cards = visibleItems(items, derivedItems, view)
+    const openCards = cards.filter(item => item.state !== 'closed')
+    const closedCards = cards.filter(item => item.state === 'closed')
+    const closedPages = (await $.state.get(CLOSED_PAGES)).value ?? 0
+    // The Closed filter is all closed rows, so its fold stays open.
+    const closedShown = view.filter === 'closed' || ((await $.state.get(CLOSED_OPEN)).value ?? false)
+    const fold = closedFold(closedCards, closedPages)
+    const restHidden = (await $.state.get(REST_HIDDEN)).value ?? false
+    const refreshingList = (await $.state.get(REFRESHING)).value ?? false
     const chip = (key: string, label: string, active: boolean, onPress: () => unknown, color?: string) => (
       <Button key={key} label={label} variant={active ? 'primary' : undefined} onPress={onPress}>
         <Text color={active ? undefined : color} dimColor={!active && color === undefined}>
@@ -1662,10 +1729,50 @@ ${card.chain}`}</Text>
           )}
         </Box>
         {snapshot.error && <Text color={STATUS_STYLES.blocked.color}>{`⚠ ${snapshot.error}`}</Text>}
-        {cards.length === 0 && <Text dimColor>Nothing matches this view.</Text>}
+        {snapshot.restFallback && !restHidden && (
+          <Box key="rest-notice" flexDirection="row" alignItems="center" columnGap="sm" flexWrap="wrap">
+            <Text color={DSH.warn} size="footnote">
+              ⚠ GitHub GraphQL failed, so this list came from REST: sub-issue and blocked-by links are missing.
+            </Text>
+            <Button key="rest-hide" label="Hide for this session" dimColor onPress={() => $.state.set(REST_HIDDEN, true)}>
+              <Text size="footnote">Hide for this session</Text>
+            </Button>
+          </Box>
+        )}
+        {cards.length === 0 && !refreshingList && <Text dimColor>Nothing matches this view.</Text>}
+        {refreshingList && items.length === 0 && (
+          <Box key="skeleton" flexDirection="column" rowGap="sm">
+            {[0, 1, 2].map(row => (
+              <Box key={`skeleton:${row}`} borderStyle="round" borderColor={DSH.borderQuiet} padding="sm">
+                <Text dimColor>{'░'.repeat(24)}</Text>
+              </Box>
+            ))}
+          </Box>
+        )}
         <Box flexDirection="column" rowGap="sm">
-          {cards.map(item => renderCard(item, items, derivedItems))}
+          {openCards.map(item => renderCard(item, items, derivedItems))}
         </Box>
+        {closedCards.length > 0 && (
+          <Box key="closed-fold" flexDirection="column" rowGap="sm" marginTop="md">
+            <Button key="closed-toggle" label={`Closed ${fold.total}`} dimColor onPress={() => $.state.set(CLOSED_OPEN, !closedShown)}>
+              <Text>{`${closedShown ? '▾' : '▸'} Closed ${fold.total} (${fold.loaded} loaded)`}</Text>
+            </Button>
+            {closedShown && (
+              <Box flexDirection="column" rowGap="sm">
+                {fold.rows.map(item => renderCard(item, items, derivedItems))}
+                {refreshingList && <Text dimColor key="closed-loading">{'░'.repeat(24)}</Text>}
+                <Box flexDirection="row" alignItems="center" columnGap="sm">
+                  <Text dimColor size="footnote" key="closed-paging">{`${fold.loaded} loaded / ${fold.total} total`}</Text>
+                  {fold.more && (
+                    <Button key="closed-more" label="Load more closed" onPress={() => $.state.set(CLOSED_PAGES, closedPages + 1)}>
+                      <Text size="footnote">Load more</Text>
+                    </Button>
+                  )}
+                </Box>
+              </Box>
+            )}
+          </Box>
+        )}
       </Box>
     )
   })

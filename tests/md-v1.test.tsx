@@ -55,7 +55,7 @@ for (const surface of SURFACES) {
 
     expect(cards).toContainEqual(expect.stringMatching(/Spec.*Live readings from the running game.*ready-for-agent/))
     expect(cards).toContainEqual(expect.stringMatching(/Map.*Checkout UX/))
-    expect(cards).toContainEqual(expect.stringMatching(/Bug.*Login crashes on empty password.*Ready.*bug.*needs-triage/))
+    expect(cards).toContainEqual(expect.stringMatching(/Login crashes on empty password.*Bug.*bug.*needs-triage.*Ready/))
     expect(cards.some(c => /Exporter harness|Capacity from Humanity|Prototype the card form/.test(c))).toBe(false)
     expect(cards.some(c => /Could not read/.test(c))).toBe(false)
     await ui.unmount()
@@ -76,14 +76,14 @@ for (const surface of SURFACES) {
 
     await ui.press({ key: 'filter:open' })
     const cards = await cardTexts(ui)
-    expect(cards).toContainEqual(expect.stringMatching(/Prototype.*Prototype the card form.*Ready/))
+    expect(cards).toContainEqual(expect.stringMatching(/Prototype the card form.*Prototype.*Ready/))
     expect(cards).toContainEqual(expect.stringMatching(/Capacity from Humanity.*Blocked/))
-    expect(cards).toContainEqual(expect.stringMatching(/Chrome from the loadout.*Claimed.*ready-for-agent.*needs-info/))
+    expect(cards).toContainEqual(expect.stringMatching(/Chrome from the loadout.*ready-for-agent.*needs-info.*Claimed/))
     expect(cards).toContainEqual(expect.stringMatching(/The docs stop teaching the bug.*Ready/))
 
     await ui.press({ key: 'filter:closed' })
     const closed = await cardTexts(ui)
-    expect(closed).toContainEqual(expect.stringMatching(/Research.*Research payment providers.*Closed/))
+    expect(closed).toContainEqual(expect.stringMatching(/Research payment providers.*Research.*Closed/))
     expect(closed).toContainEqual(expect.stringMatching(/Exporter harness.*Closed/))
     await ui.unmount()
   })

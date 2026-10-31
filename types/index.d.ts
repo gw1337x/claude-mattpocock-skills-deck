@@ -88,6 +88,8 @@ export type BoardSnapshot = {
   readAt: number
   /** Why the tracker could not be read (a `gh` failure); the Pane shows it. */
   error?: string
+  /** True when GraphQL failed and the issues came from the plain REST read, without native links. */
+  restFallback?: boolean
 }
 
 /** Where the New Requirement and +BUG Pane is: choosing a card, writing the requirement, or filling the bug fields. */
@@ -131,6 +133,18 @@ declare module 'claude-code' {
       openedByDeck: boolean
       /** The Entry Chooser or +BUG form in progress; absent or null means none is open. */
       entryFlow: EntryFlow | null
+      /** What the last refresh changed or added, and when; the List flashes those rows. */
+      flash: { changed: string[]; added: string[]; at: number } | null
+      /** Extra pages of closed rows loaded under the Closed fold. */
+      closedPages: number
+      /** True while the Closed fold is open. */
+      closedOpen: boolean
+      /** Paths of rows whose labels show in full rather than folded behind +N. */
+      rowLabels: string[]
+      /** The row whose Copy link was last pressed, whether it worked, and when. */
+      copied: { path: string; ok: boolean; at: number } | null
+      /** True once the REST-fallback notice was hidden for this session. */
+      restHidden: boolean
       /** The Suggestion pills from the last reply and when they arrived; absent or null shows none. */
       suggestions: { items: Suggestion[]; at: number } | null
     }

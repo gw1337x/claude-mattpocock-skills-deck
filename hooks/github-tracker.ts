@@ -117,32 +117,70 @@ const listIssues = async (run: Run): Promise<Issue[]> => {
   return issues.slice(0, GH_LIST_LIMIT)
 }
 
+const toItem = (issue: Issue): BoardItem => {
+  const labels = (issue.labels?.nodes ?? []).map(label => label.name)
+  const body = issue.body ?? ''
+  const assignees = (issue.assignees?.nodes ?? []).map(assignee => assignee.login ?? '')
+  const open = issue.state.toUpperCase() !== 'CLOSED'
+  const native = (issue.blockedBy?.nodes ?? []).flatMap(node => (typeof node.number === 'number' ? [node.number] : []))
+  return {
+    kind: detectKind(body, new Map(), labels, ''),
+    title: issue.title,
+    number: issue.number,
+    feature: 'github',
+    labels,
+    state: open ? 'open' : 'closed',
+    path: githubPath(issue.number),
+    // The body's `Blocked by:` lines only stand in when GitHub holds no dependency.
+    blockedBy: open && native.length > 0 ? native : bodyBlockers(body),
+    assignees,
+    claimed: assignees.length > 0,
+    updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
+    parent: typeof issue.parent?.number === 'number' ? githubPath(issue.parent.number) : null,
+    ...progressField(body),
+    url: issue.url,
+  }
+}
+
 /** Every issue in the repo as List items; a sub-issue carries its parent's path as `parent`. */
-export const readGithubItems = async (run: Run): Promise<BoardItem[]> =>
-  (await listIssues(run)).map(issue => {
-    const labels = (issue.labels?.nodes ?? []).map(label => label.name)
-    const body = issue.body ?? ''
-    const assignees = (issue.assignees?.nodes ?? []).map(assignee => assignee.login ?? '')
-    const open = issue.state.toUpperCase() !== 'CLOSED'
-    const native = (issue.blockedBy?.nodes ?? []).flatMap(node => (typeof node.number === 'number' ? [node.number] : []))
-    return {
-      kind: detectKind(body, new Map(), labels, ''),
-      title: issue.title,
-      number: issue.number,
-      feature: 'github',
-      labels,
-      state: open ? 'open' : 'closed',
-      path: githubPath(issue.number),
-      // The body's `Blocked by:` lines only stand in when GitHub holds no dependency.
-      blockedBy: open && native.length > 0 ? native : bodyBlockers(body),
-      assignees,
-      claimed: assignees.length > 0,
-      updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
-      parent: typeof issue.parent?.number === 'number' ? githubPath(issue.parent.number) : null,
-      ...progressField(body),
-      url: issue.url,
-    }
-  })
+export const readGithubItems = async (run: Run): Promise<BoardItem[]> => (await listIssues(run)).map(toItem)
+
+type RestIssue = {
+  number: number
+  title: string
+  state: string
+  labels?: ({ name?: string } | string)[]
+  assignees?: { login?: string }[]
+  updated_at?: string
+  html_url?: string
+  body?: string | null
+  pull_request?: unknown
+}
+
+/**
+ * The plain REST read DSH falls back to when GraphQL fails: the issues without native
+ * blocked-by or sub-issue links (the body's `Blocked by:` lines stand in), pull requests left out.
+ */
+export const readGithubRest = async (run: Run): Promise<BoardItem[]> => {
+  const out = await runGh(run, ['api', 'repos/{owner}/{repo}/issues?state=all&per_page=100', '--paginate', '--slurp'])
+  const pages = JSON.parse(out) as RestIssue[] | RestIssue[][]
+  const issues = (pages as unknown[]).flat() as RestIssue[]
+  return issues
+    .filter(issue => issue.pull_request === undefined)
+    .slice(0, GH_LIST_LIMIT)
+    .map(issue =>
+      toItem({
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        labels: { nodes: (issue.labels ?? []).map(label => ({ name: typeof label === 'string' ? label : (label.name ?? '') })) },
+        assignees: { nodes: (issue.assignees ?? []).map(assignee => ({ login: assignee.login })) },
+        updatedAt: issue.updated_at,
+        url: issue.html_url,
+        body: issue.body ?? '',
+      }),
+    )
+}
 
 /** An issue's body and its comments' bodies, oldest first. */
 export const readGithubDetail = async (run: Run, number: number): Promise<{ body: string; comments: string[] }> => {

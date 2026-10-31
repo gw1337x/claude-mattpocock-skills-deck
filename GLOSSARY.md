@@ -89,6 +89,14 @@ _Avoid_: Env Check
 **Palette**:
 The Pane view that lists label colours and edits them. Action buttons and label chips take their label's colour from it.
 
+**Settings**:
+The Pane view, opened from the header's gear, with the Debug log controls and a read-only overview of the Backend per workspace (Explicit, Auto or Unset, with Refresh).
+_Avoid_: Templates file (that is the file for Action prompts)
+
+**Debug log**:
+The deck's own log of what it noted, written to one file per day under `~/.claude/mattpocock-skills-deck/logs` while its switch in Settings is on. A grey dot in the Status capsule shows only while it is on, and offers export, open folder, copy path and clear.
+_Avoid_: Diagnostics
+
 **Entry Chooser**:
 The choice between an Explore map and an Implementation map when starting a New Requirement.
 

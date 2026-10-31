@@ -55,15 +55,24 @@ const ghOptional = async (run: Run, argv: string[]): Promise<unknown> => {
   }
 }
 
+type Linked = { nodes?: { number?: number }[] }
 type Issue = {
   number: number
   title: string
   state: string
-  labels?: { name: string }[]
-  assignees?: { login?: string }[]
+  labels?: { nodes?: { name: string }[] }
+  assignees?: { nodes?: { login?: string }[] }
   updatedAt?: string
   url?: string
   body?: string
+  blockedBy?: Linked
+  parent?: { number?: number } | null
+}
+
+type Page = {
+  data?: {
+    repository?: { issues?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Issue[] } }
+  }
 }
 
 export const githubPath = (number: number): string => `gh:${number}`
@@ -72,65 +81,68 @@ export const githubPath = (number: number): string => `gh:${number}`
 const bodyBlockers = (body: string): number[] =>
   [...body.matchAll(/^\W*blocked by:?\W*(.*)$/gim)].flatMap(line => (line[1] ?? '').match(/\d+/g)?.map(Number) ?? [])
 
-const numbersOf = (value: unknown): number[] =>
-  Array.isArray(value)
-    ? value.flatMap(entry => (typeof entry?.number === 'number' ? [entry.number as number] : []))
-    : []
-
-const isContainer = (item: BoardItem) => item.kind === 'map' || item.kind === 'spec'
+/** Issues per GraphQL page; GitHub's maximum. */
+const GH_PAGE_SIZE = 100
 
 /** The most issues one read takes; a read that returns this many may have left some out. */
 export const GH_LIST_LIMIT = 500
 
-/** Every issue in the repo as List items; a Container's sub-issues carry its path as `parent`. */
-export const readGithubItems = async (run: Run): Promise<BoardItem[]> => {
-  const listed = JSON.parse(
-    await runGh(run, [
-      'issue', 'list', '--state', 'all', '--limit', String(GH_LIST_LIMIT),
-      '--json', 'number,title,state,labels,assignees,updatedAt,url,body',
-    ]),
-  ) as Issue[]
+const ISSUES_QUERY = `query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    issues(first: ${GH_PAGE_SIZE}, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title state updatedAt url body
+        labels(first: 50) { nodes { name } }
+        assignees(first: 20) { nodes { login } }
+        blockedBy(first: 50) { nodes { number } }
+        parent { number }
+      }
+    }
+  }
+}`
 
-  const items: BoardItem[] = listed.map(issue => {
-    const labels = (issue.labels ?? []).map(label => label.name)
+/** Every issue in the repo, with native links, in one GraphQL request per 100 issues. */
+const listIssues = async (run: Run): Promise<Issue[]> => {
+  const issues: Issue[] = []
+  let cursor: string | null = null
+  while (issues.length < GH_LIST_LIMIT) {
+    const argv = ['api', 'graphql', '-f', `query=${ISSUES_QUERY}`, '-F', 'owner={owner}', '-F', 'repo={repo}']
+    if (cursor !== null) argv.push('-F', `cursor=${cursor}`)
+    const page = ((await ghJson(run, argv)) as Page).data?.repository?.issues
+    issues.push(...(page?.nodes ?? []))
+    if (!page?.pageInfo?.hasNextPage || !page.pageInfo.endCursor) break
+    cursor = page.pageInfo.endCursor
+  }
+  return issues.slice(0, GH_LIST_LIMIT)
+}
+
+/** Every issue in the repo as List items; a sub-issue carries its parent's path as `parent`. */
+export const readGithubItems = async (run: Run): Promise<BoardItem[]> =>
+  (await listIssues(run)).map(issue => {
+    const labels = (issue.labels?.nodes ?? []).map(label => label.name)
     const body = issue.body ?? ''
+    const assignees = (issue.assignees?.nodes ?? []).map(assignee => assignee.login ?? '')
+    const open = issue.state.toUpperCase() !== 'CLOSED'
+    const native = (issue.blockedBy?.nodes ?? []).flatMap(node => (typeof node.number === 'number' ? [node.number] : []))
     return {
       kind: detectKind(body, new Map(), labels, ''),
       title: issue.title,
       number: issue.number,
       feature: 'github',
       labels,
-      state: issue.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open',
+      state: open ? 'open' : 'closed',
       path: githubPath(issue.number),
-      blockedBy: bodyBlockers(body),
-      assignees: (issue.assignees ?? []).map(assignee => assignee.login ?? ''),
-      claimed: (issue.assignees ?? []).length > 0,
+      // The body's `Blocked by:` lines only stand in when GitHub holds no dependency.
+      blockedBy: open && native.length > 0 ? native : bodyBlockers(body),
+      assignees,
+      claimed: assignees.length > 0,
       updated: issue.updatedAt ? Date.parse(issue.updatedAt) : 0,
-      parent: null,
+      parent: typeof issue.parent?.number === 'number' ? githubPath(issue.parent.number) : null,
       ...progressField(body),
       url: issue.url,
     }
   })
-
-  await Promise.all(
-    items.map(async item => {
-      if (isContainer(item)) {
-        const children = numbersOf(await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/sub_issues`]))
-        for (const child of items) {
-          if (child.number !== null && children.includes(child.number)) child.parent = item.path
-        }
-      }
-      if (item.state === 'open') {
-        const native = numbersOf(
-          await ghOptional(run, ['api', `repos/{owner}/{repo}/issues/${item.number}/dependencies/blocked_by`]),
-        )
-        // The body's `Blocked by:` lines only stand in when GitHub holds no dependency.
-        if (native.length > 0) item.blockedBy = native
-      }
-    }),
-  )
-  return items
-}
 
 /** An issue's body and its comments' bodies, oldest first. */
 export const readGithubDetail = async (run: Run, number: number): Promise<{ body: string; comments: string[] }> => {

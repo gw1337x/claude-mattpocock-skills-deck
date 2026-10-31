@@ -120,7 +120,7 @@ for (const surface of SURFACES) {
     const ui = await mount($, surface)
 
     expect(await texts(ui)).toContain('Backend: GitHub')
-    expect(gh.calls.some(c => c.startsWith('issue list'))).toBe(true)
+    expect(gh.calls.some(c => c.startsWith('api graphql'))).toBe(true)
     await ui.unmount()
   })
 

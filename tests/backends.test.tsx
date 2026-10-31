@@ -201,6 +201,19 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
+  for (const [issues, pages] of [[0, 1], [250, 3]] as const) {
+    test(`a GitHub read takes ${pages} GraphQL request(s) for ${issues + 8} issues, with no per-issue calls on ${surface}`, async ($, on) => {
+      serveFiles(on, { ...GITHUB_DOC })
+      const gh = serveGh(on, { padIssues: issues })
+      const ui = await mount($, surface)
+      await texts(ui)
+
+      expect(gh.calls.filter(c => c.startsWith('api graphql'))).toHaveLength(pages)
+      expect(gh.calls.filter(c => /sub_issues|blocked_by|^issue list/.test(c))).toEqual([])
+      await ui.unmount()
+    })
+  }
+
   for (const [failure, message] of FAILURES) {
     test(`a ${failure} gh failure shows its message and names Checks on ${surface}`, async ($, on) => {
       serveFiles(on, { ...GITHUB_DOC })
@@ -241,7 +254,7 @@ for (const surface of SURFACES) {
 
     await ui.press({ key: 'backend:github' })
     expect(await texts(ui)).toContain('Backend: GitHub')
-    expect(gh.calls.some(c => c.startsWith('issue list'))).toBe(true)
+    expect(gh.calls.some(c => c.startsWith('api graphql'))).toBe(true)
     expect([...stored.values()]).toContain('github')
     await ui.unmount()
 

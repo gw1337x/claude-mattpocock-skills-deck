@@ -213,7 +213,8 @@ for (const surface of SURFACES) {
     const pressed = band.press({ key: 'refresh-band' })
     const spinning = await mountBand($, surface)
     expect(await labels(spinning)).toContain('Refreshing')
-    expect(await texts(spinning)).toContain('◌')
+    // A surface with images turns a ring; one without shows a still one. Either way the idle arrow is gone.
+    expect(await texts(spinning)).not.toContain('↻')
     release()
     await pressed
     expect(await labels(spinning)).not.toContain('Refreshing')

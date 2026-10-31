@@ -480,6 +480,9 @@ const ENTRY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16
   )
   .join('')}</svg>`
 
+/** A ring turning once a second, for Refresh while the tracker is read. */
+const SPIN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="${DSH.link}" stroke-width="2" stroke-dasharray="20 18"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="0.8s" repeatCount="indefinite"/></circle></svg>`
+
 const FILTERS: [BoardFilter, string][] = [
   ['all', 'All'],
   ['open', 'Open'],
@@ -652,8 +655,8 @@ export const register: Register = on => {
     const boardItem = (ticketKey: string) => snapshot.items.find(each => keyOf(backend, each) === ticketKey)
     // Only a score the Checks already worked out; the band never runs the checks itself.
     let envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
-    if (envChecks === null && !collapsed) {
-      // Until a refresh has scored the setup, score it for this draw; a draw stores nothing.
+    if (envChecks === null && !collapsed && backend === 'markdown') {
+      // Until a refresh has scored the setup, a Markdown project is scored for this draw (no `gh` calls); a draw stores nothing.
       try {
         envChecks = await runEnvChecks($, backend)
       } catch {
@@ -881,12 +884,13 @@ export const register: Register = on => {
                 undefined,
                 env === null ? undefined : `${env.passed}/${env.total}`,
               )}
+              {refreshing && Svg && <Svg key="refresh-spin" source={SPIN_SVG} alt="Refreshing" width={16} height={16} />}
               {item(
                 'refresh-band',
                 refreshing ? 'Refreshing' : tooltip,
                 stale ? RED : GREY_INK,
                 () => refresh($),
-                refreshing ? '◌' : '↻',
+                refreshing ? (Svg ? ' ' : '◌') : '↻',
                 words.has('refresh') ? timeAgo : undefined,
                 undefined,
                 'tip:refresh',

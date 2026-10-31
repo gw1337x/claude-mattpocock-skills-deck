@@ -17,8 +17,11 @@ import {
   openChildren,
   parentOfKind,
   parsePlan,
+  refuseCycle,
   refuseOversize,
+  refuseTicketParent,
   requiredTitle,
+  reread,
   withLabels,
   wordsOf,
   type CreateKind,
@@ -106,11 +109,6 @@ const withKey = async (gh: Gh, key: string): Promise<{ number: number; body: str
   return found.flatMap(issue => ((issue.body ?? '').includes(marker(key).slice(0, -4)) ? [{ number: issue.number, body: issue.body ?? '' }] : []))
 }
 
-const reread = async (tracker: DeckTracker, number: number, extra: Record<string, unknown> = {}) => {
-  const fresh = await tracker.reload!()
-  return { ...extra, ...(await deckIssueGet(fresh, { key: `#${number}` })) }
-}
-
 /** A blocker named by `7`, `#7` or `gh:7`, as an issue that exists. */
 const blockerNumber = (tracker: DeckTracker, raw: unknown): number => {
   const text = String(raw).trim()
@@ -118,16 +116,6 @@ const blockerNumber = (tracker: DeckTracker, raw: unknown): number => {
   if (number === undefined) throw new DeckRefusal(`Blocker ${text} is not an issue number such as #7.`)
   if (!tracker.items.some(item => item.number === Number(number))) throw new DeckRefusal(`No issue #${number} to wait on.`)
   return Number(number)
-}
-
-/** Refuses a blocker list that would make an issue wait, however indirectly, on itself. */
-const refuseCycle = (tracker: DeckTracker, proposed: Map<number, number[]>) => {
-  const edges = (number: number): number[] => proposed.get(number) ?? tracker.items.find(item => item.number === number)?.blockedBy ?? []
-  for (const start of proposed.keys()) {
-    const seen = new Set<number>()
-    const walk = (number: number): boolean => number === start || (!seen.has(number) && (seen.add(number), edges(number).some(walk)))
-    if (edges(start).some(walk)) throw new DeckRefusal(`#${start} would wait on itself through ${edges(start).map(number => `#${number}`).join(', ')}.`)
-  }
 }
 
 /** The labels a new issue of this kind carries; a map-ticket must say which kind of ticket it is. */
@@ -174,7 +162,7 @@ export const githubIssueCreate = (tracker: DeckTracker, input: Record<string, un
           : parentInput
             ? findItem(tracker, { key: input.parentKey })
             : undefined
-    if (parent !== undefined && !isContainer(parent)) throw new DeckRefusal(`${keyOf(tracker.backend, parent)} is an issue, not a Map or Spec; a parent must be a Map or Spec.`)
+    if (parent !== undefined) refuseTicketParent(tracker, parent)
     const blockers = Array.isArray(input.blockedBy) ? [...new Set(input.blockedBy.map(entry => blockerNumber(tracker, entry)))] : []
     if (container && (parent !== undefined || blockers.length > 0)) throw new DeckRefusal('A Map or Spec has no parent and waits on nothing.')
 
@@ -182,7 +170,7 @@ export const githubIssueCreate = (tracker: DeckTracker, input: Record<string, un
     const idempotencyKey = stringIn(input.idempotencyKey)
     if (idempotencyKey !== undefined) {
       const existing = (await withKey(gh, idempotencyKey)).find(issue => issue.body.includes(marker(idempotencyKey)))
-      if (existing !== undefined) return reread(tracker, existing.number, { created: false })
+      if (existing !== undefined) return reread(tracker, `#${existing.number}`, { created: false })
     }
 
     let text = container ? ensureBody(body, kind === 'map') : body
@@ -192,7 +180,7 @@ export const githubIssueCreate = (tracker: DeckTracker, input: Record<string, un
     const number = await createIssue(gh, { title, body: text, labels, assignees })
     if (parent !== undefined) await setParent(gh, parent.number!, number)
     for (const blocker of blockers) await addBlocker(gh, number, blocker)
-    return reread(tracker, number, { created: true })
+    return reread(tracker, `#${number}`, { created: true })
   })
 
 export const githubIssuePatch = (tracker: DeckTracker, input: Record<string, unknown>) =>
@@ -270,7 +258,7 @@ export const githubIssuePatch = (tracker: DeckTracker, input: Record<string, unk
       const reason = stringIn(input.closeReason)
       await runGh(gh.run, ['issue', 'close', String(number), '--reason', 'completed', ...(reason === undefined ? [] : ['--comment', reason])])
     }
-    return reread(tracker, number, { changed })
+    return reread(tracker, `#${number}`, { changed })
   })
 
 type Edge = { key: unknown; parentKey?: unknown; blockedBy?: unknown }
@@ -305,7 +293,7 @@ export const githubMapLink = (tracker: DeckTracker, input: Record<string, unknow
       }
       plans.set(item.path, plan)
     }
-    refuseCycle(tracker, proposed)
+    refuseCycle(proposed, number => tracker.items.find(item => item.number === number)?.blockedBy ?? [], number => `#${number}`)
 
     await refuseReadOnly(gh)
     for (const { item, parent, blockers } of plans.values()) {

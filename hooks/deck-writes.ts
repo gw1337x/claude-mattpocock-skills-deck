@@ -244,22 +244,24 @@ const blockerNumber = (tracker: DeckTracker, feature: string, raw: unknown): num
   return number
 }
 
-/** Refuses a blocker list that would make a ticket wait, however indirectly, on itself. */
-const refuseCycle = (tracker: DeckTracker, feature: string, proposed: Map<number, number[]>) => {
-  const edges = (number: number): number[] =>
-    proposed.get(number) ??
-    tracker.items.find(item => item.feature === feature && !isContainer(item) && item.number === number)?.blockedBy ??
-    []
+/**
+ * Refuses a blocker list that would make a ticket wait, however indirectly, on itself.
+ * `proposed` holds the lists being set; `edges` gives every other ticket's current list.
+ */
+export const refuseCycle = <K>(proposed: Map<K, K[]>, edges: (key: K) => K[], name: (key: K) => string) => {
+  const waits = (key: K): K[] => proposed.get(key) ?? edges(key)
   for (const start of proposed.keys()) {
-    const seen = new Set<number>()
-    const walk = (number: number): boolean => {
-      if (number === start) return true
-      if (seen.has(number)) return false
-      seen.add(number)
-      return edges(number).some(walk)
-    }
-    if (edges(start).some(walk)) throw new DeckRefusal(`${feature}/${padNumber(start)} would wait on itself through ${[...edges(start)].map(padNumber).join(', ')}.`)
+    const seen = new Set<K>()
+    const walk = (key: K): boolean => key === start || (!seen.has(key) && (seen.add(key), waits(key).some(walk)))
+    if (waits(start).some(walk)) throw new DeckRefusal(`${name(start)} would wait on itself through ${waits(start).map(name).join(', ')}.`)
   }
+}
+
+/** Refuses a parent that is a plain ticket: only a Map or Spec can hold children. */
+export const refuseTicketParent = (tracker: DeckTracker, parent: BoardItem) => {
+  if (isContainer(parent)) return
+  const noun = tracker.backend === 'github' ? 'an issue' : 'a ticket'
+  throw new DeckRefusal(`${keyOf(tracker.backend, parent)} is ${noun}, not a Map or Spec; a parent must be a Map or Spec.`)
 }
 
 /** The Map or Spec a ticket of this kind hangs under: parentKey, else the effort named, else the only one there is. */
@@ -297,9 +299,10 @@ const findByKey = async (tracker: DeckTracker, files: DeckFiles, key: string): P
   return undefined
 }
 
-const reread = async (tracker: DeckTracker, path: string, extra: Record<string, unknown> = {}) => {
+/** The issue a write touched, read back after the tracker is read again; `key` is anything findItem takes. */
+export const reread = async (tracker: DeckTracker, key: string, extra: Record<string, unknown> = {}) => {
   const fresh = await reloaded(tracker)
-  return { ...extra, ...(await deckIssueGet(fresh, { key: path })) }
+  return { ...extra, ...(await deckIssueGet(fresh, { key })) }
 }
 
 export const wordsOf = (value: unknown): { text: string; source?: string } | undefined => {
@@ -380,7 +383,7 @@ export const deckIssueCreate = async (tracker: DeckTracker, input: Record<string
           : input.parentKey === undefined || String(input.parentKey).trim() === ''
             ? undefined
             : findItem(tracker, { key: input.parentKey, ...(scopeOf(input) === null ? {} : { effort: scopeOf(input) }) })
-    if (parent !== undefined && !isContainer(parent)) throw new DeckRefusal(`${keyOf(tracker.backend, parent)} is a ticket, not a Map or Spec; a parent must be a Map or Spec.`)
+    if (parent !== undefined) refuseTicketParent(tracker, parent)
     const known = efforts(tracker)
     // A loose ticket joins the only effort there is; with several, it starts a folder named for its title.
     const feature = parent?.feature ?? scopeOf(input) ?? (known.length === 1 ? known[0]! : freshFeature(tracker, title))
@@ -499,7 +502,10 @@ export const deckMapLink = async (tracker: DeckTracker, input: Record<string, un
     }
     plans.set(item.path, plan)
   }
-  for (const [feature, map] of proposed) refuseCycle(tracker, feature, map)
+  for (const [feature, map] of proposed) {
+    const current = (number: number) => tracker.items.find(item => item.feature === feature && !isContainer(item) && item.number === number)?.blockedBy ?? []
+    refuseCycle(map, current, number => `${feature}/${padNumber(number)}`)
+  }
 
   for (const { item, parent, blockers } of plans.values()) {
     let text = await files.read(item.path)

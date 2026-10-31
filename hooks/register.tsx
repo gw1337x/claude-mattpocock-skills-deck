@@ -35,7 +35,7 @@ import {
   statusTag,
 } from './board-ui'
 import { allLabels, DEFAULT_VIEW, defaultDescending, derive, efforts, labelsByClicks, looseCount, progressText, visibleItems, type Derived } from './derive'
-import { buildChecks, gatherEnv, scoreOf, SETUP_PROMPT, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
+import { buildChecks, gatherEnv, scoreOf, TRACKER_DOC, trackerDocMissing, type Check } from './env-check'
 import {
   canWriteGithub,
   GH_LIST_LIMIT,
@@ -209,6 +209,7 @@ const DETAIL = { plugin: 'mattpocock-skills-deck', key: 'detail' } as const
 const TAB = { plugin: 'mattpocock-skills-deck', key: 'tab' } as const
 const SKILL_DETAIL = { plugin: 'mattpocock-skills-deck', key: 'skillDetail' } as const
 const ENV_CHECKS = { plugin: 'mattpocock-skills-deck', key: 'envChecks' } as const
+const DIAGNOSTICS_OPEN = { plugin: 'mattpocock-skills-deck', key: 'diagnosticsOpen' } as const
 const PALETTE_NOTE = { plugin: 'mattpocock-skills-deck', key: 'paletteNote' } as const
 const SKILLS_MENU = { plugin: 'mattpocock-skills-deck', key: 'skillsMenu' } as const
 const ROUTE_OPEN = { plugin: 'mattpocock-skills-deck', key: 'routeOpen' } as const
@@ -493,9 +494,30 @@ const loadedSkills = async ($: Engine): Promise<string[] | null> => {
   }
 }
 
-/** Runs the Checks now for this project's Backend; nothing is stored. */
-const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> =>
-  buildChecks(
+const labelsSkippedKey = async ($: Engine) => `labels-skipped:${await workspaceRoot($)}`
+
+const readLabelsSkipped = async ($: Engine): Promise<boolean> => {
+  try {
+    return (await $.store.get(await labelsSkippedKey($))) === true
+  } catch {
+    return false
+  }
+}
+
+/** Skip drops the incomplete-labels row from the Checks and the score, for this workspace. */
+const setLabelsSkipped = async ($: Engine, skipped: boolean) => {
+  try {
+    await $.store.set(await labelsSkippedKey($), skipped)
+  } catch {
+    // Without a store the choice lasts only until the next draw.
+  }
+  await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
+  $.ui.invalidate('ui.render')
+}
+
+/** Runs the Checks now for this project's Backend; nothing is stored. Only the applicable checks are built. */
+const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> => {
+  const checks = buildChecks(
     backend,
     await gatherEnv(backend, {
       run: ghRun($),
@@ -503,6 +525,9 @@ const runEnvChecks = async ($: Engine, backend: Backend): Promise<Check[]> =>
       loaded: () => loadedSkills($),
     }),
   )
+  const skipped = await readLabelsSkipped($)
+  return checks.filter(check => !(skipped && check.id === 'github-labels' && check.skippable))
+}
 
 /** The text of a skill's SKILL.md, or null when it is in none of the usual places. */
 const readSkillFile = async ($: Engine, name: string): Promise<string | null> => {
@@ -1854,6 +1879,9 @@ ${card.chain}`}</Text>
       const checks = (await $.state.get(ENV_CHECKS)).value ?? (await runEnvChecks($, backend))
       const { passed, total } = scoreOf(checks)
       const layout = await readLayout($)
+      const diagnosticsOpen = (await $.state.get(DIAGNOSTICS_OPEN)).value === true
+      const toggleDiagnostics = () => $.state.set(DIAGNOSTICS_OPEN, !diagnosticsOpen)
+      const loadedNames = await loadedSkills($)
       const noRepo = !(await isGitRepo(ghRun($)))
       const noRepoIgnored = noRepo && (await readNoRepoIgnored($))
       return (
@@ -1883,7 +1911,7 @@ ${card.chain}`}</Text>
               onPress={recheck}
             />
             {trackerDocMissing(checks) && (
-              <Button key="run-setup" label="Run setup" onPress={() => fillPrompt($, SETUP_PROMPT)} />
+              <Button key="run-setup" label="Run setup" onPress={async () => fillPrompt($, setupRun(backend, layout))} />
             )}
           </Box>
           <Box flexDirection="column" marginTop="sm">
@@ -1907,9 +1935,49 @@ ${card.chain}`}</Text>
           {checks.map(check => (
             <Box key={`check:${check.id}`} flexDirection="column">
               <Text>{`${check.ok ? '✓' : '✗'} ${check.label}${check.detail ? ` (${check.detail})` : ''}`}</Text>
-              {!check.ok && <Button key={`fix:${check.id}`} label="Fix" onPress={() => fillPrompt($, check.fix)} />}
+              {!check.ok && (
+                <Box flexDirection="row" columnGap="sm">
+                  <Button key={`recheck:${check.id}`} label="Re-check" onPress={recheck} />
+                  <Button
+                    key={`fix:${check.id}`}
+                    label={
+                      check.id === 'github-labels'
+                        ? 'Inject completion guide'
+                        : check.id.startsWith('doc:')
+                          ? 'Run'
+                          : check.id === 'matt-skills'
+                            ? 'Install the Matt skill suite'
+                            : 'Inject fix guide'
+                    }
+                    onPress={async () =>
+                      fillPrompt($, check.id.startsWith('doc:') ? setupRun(backend, await readLayout($)) : check.fix)
+                    }
+                  />
+                  {check.link !== undefined && <Link href={check.link}>Open link</Link>}
+                  {check.form === 'publish' && (
+                    <Button key={`form:${check.id}`} label="Fill form" onPress={() => openPublish($)} />
+                  )}
+                  {check.skippable === true && (
+                    <Button key={`skip:${check.id}`} label="Skip" onPress={() => setLabelsSkipped($, true)} />
+                  )}
+                </Box>
+              )}
             </Box>
           ))}
+          <Box key="diagnostics" flexDirection="column" marginTop="sm">
+            <Button key="diagnostics-toggle" label="Capability diagnostics" onPress={toggleDiagnostics}>
+              <Text dimColor>{`${diagnosticsOpen ? '▾' : '▸'} Capability diagnostics`}</Text>
+            </Button>
+            {diagnosticsOpen && (
+              <Box flexDirection="column">
+                <Text dimColor>{`Backend: ${BACKEND_NAMES[backend]}`}</Text>
+                <Text dimColor>{`Applicable checks: ${total}, passed: ${passed}`}</Text>
+                <Text dimColor>
+                  {loadedNames === null ? 'Installed skills: could not be read' : `Installed skills read: ${loadedNames.length}`}
+                </Text>
+              </Box>
+            )}
+          </Box>
         </Box>
       )
     }

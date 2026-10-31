@@ -1,6 +1,7 @@
 import type { Backend, Check } from '../types'
 import type { Run } from './github-tracker'
 import { installedMattSkills } from './skills'
+import { CLI_INSTALL, GH_AUTH_LOGIN, installSkills } from './setup'
 
 export type { Check }
 
@@ -27,6 +28,25 @@ export const REQUIRED_SKILLS = [
   'handoff',
   'setup-matt-pocock-skills',
 ]
+
+/** DSH's repoAccessFix, for a repository the tools cannot reach. */
+export const REPO_ACCESS_FIX = `The repository is not readable right now (the tools report that they cannot reach it). Ordering rule: if the repo does not exist yet, run "Create & publish" to create and push it, then re-check; investigate in order:
+1. Existence: when this directory has no remote repo yet, click "Create & publish" (the two-step wizard creates the repo and pushes it);
+2. Login and permissions: check the status of the "Signed in to GitHub" row; a private repo needs access for the signed-in account (no access and "not found" can both come back as 404);
+3. Network and proxy: check the network row in the environment check and follow what it says.
+After fixing, ask the user to re-check.`
+
+/** DSH's ensureLabels, for the labels still missing. */
+export const ensureLabels = (names: string[]): string => `Please complete the missing canonical labels (${names.length} total):
+
+Required labels: ${names.join(', ')}
+
+Steps:
+- [ ] See what labels exist now: call deck_context for the current backend and repo; read which labels a ticket carries with deck_issue_get
+- [ ] Add whatever is missing: call deck_issue_patch with the missing names in addLabels — it applies labels the way the current backend does, never creates duplicates, and reports each one
+- [ ] Re-check with deck_context until the labels are complete
+
+A read-only repo cannot take labels (creating labels needs push, labeling tickets needs triage or higher): fork it to your own account first, then point the workspace origin at the fork.`
 
 export const SETUP_PROMPT = '/setup-matt-pocock-skills'
 
@@ -88,19 +108,21 @@ export const buildChecks = (backend: Backend, facts: EnvFacts): Check[] => {
       id: 'gh-installed',
       label: 'gh is installed',
       ok: gh.installed,
-      fix: 'The GitHub CLI (gh) is not installed or will not start. Help me install it for this machine and confirm `gh --version` works.',
+      fix: CLI_INSTALL,
+      link: 'https://cli.github.com/',
     })
     checks.push({
       id: 'gh-logged-in',
       label: 'gh is logged in',
       ok: gh.loggedIn,
-      fix: 'gh is not logged in to GitHub. Walk me through `gh auth login` and confirm `gh auth status` passes.',
+      fix: GH_AUTH_LOGIN,
     })
     checks.push({
       id: 'github-remote',
       label: 'A GitHub remote is present',
       ok: gh.hasRemote,
-      fix: 'This repo has no GitHub remote. Help me create or connect a GitHub repo and add it as `origin`.',
+      fix: REPO_ACCESS_FIX,
+      form: 'publish',
     })
     const missing = gh.labels === null ? null : WORKFLOW_LABELS.filter(label => !gh.labels?.includes(label))
     checks.push({
@@ -108,7 +130,8 @@ export const buildChecks = (backend: Backend, facts: EnvFacts): Check[] => {
       label: 'The workflow labels exist',
       ok: missing !== null && missing.length === 0,
       detail: missing === null ? (gh.loggedIn ? 'could not list the labels' : 'needs gh logged in') : missing.length > 0 ? `missing ${missing.join(', ')}` : undefined,
-      fix: `Create the missing workflow labels in this repo's GitHub issues with \`gh label create\`: ${(missing === null || missing.length === 0 ? WORKFLOW_LABELS : missing).join(', ')}.`,
+      fix: ensureLabels(missing === null || missing.length === 0 ? WORKFLOW_LABELS : missing),
+      skippable: missing !== null && missing.length > 0,
     })
   }
 
@@ -128,7 +151,7 @@ export const buildChecks = (backend: Backend, facts: EnvFacts): Check[] => {
     label: 'The Matt skills the Actions need are installed',
     ok: installed !== null && lacking.length === 0,
     detail: installed === null ? 'could not read the installed skills' : lacking.length > 0 ? `missing ${lacking.join(', ')}` : undefined,
-    fix: `Install the missing Matt skills from mattpocock/skills so the deck's Actions can run them: ${(lacking.length > 0 ? lacking : REQUIRED_SKILLS).join(', ')}.`,
+    fix: installSkills(),
   })
   return checks
 }

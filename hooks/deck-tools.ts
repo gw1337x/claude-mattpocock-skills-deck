@@ -128,7 +128,7 @@ export const DECK_TOOLS: DeckToolSpec[] = [
       properties: {
         key: KEY_SCHEMA,
         note: { type: 'string', description: 'A few words on what you are doing.' },
-        workRouteDetail: { type: 'string', enum: ['core', 'standard'], description: 'How much of the call the Work Route records.' },
+        workRouteDetail: { type: 'string', enum: ['core', 'standard'], description: 'How much of the Work Route the reply carries: core (default) is ticket key, session and time for the newest 20 entries; standard adds title and action for every entry.' },
         release: { type: 'boolean', default: false, description: "true takes the ticket off this session's Work Route." },
         ...SCOPE_SCHEMA,
       },

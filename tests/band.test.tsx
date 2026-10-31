@@ -161,49 +161,29 @@ for (const surface of SURFACES) {
     await band.unmount()
   })
 
-  test(`New offers Map and Spec and fills the matching prompt without sending on ${surface}`, async ($, on) => {
+  test(`New and +Bug open the entry Pane instead of filling the box on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveBox(on, ['Map', 'Spec'])
+    const log = serveBox(on)
     const pane = await mountPane($, surface)
 
     await pane.press({ key: 'pane-new' })
-    await pane.press({ key: 'pane-new' })
+    await pane.press({ key: 'pane-bug' })
 
-    expect(log.fills).toHaveLength(2)
-    expect(log.fills[0]).toMatch(/^\/wayfinder/)
-    expect(log.fills[1]).toMatch(/^\/grill-with-docs/)
-    expect(log.fills[1]).toContain('/to-spec')
-    expect(log.fills[1]).toContain('/to-tickets')
-    expect(log.submitted).toBe(0)
-    await pane.unmount()
-  })
-
-  test(`New fills nothing when the question is dismissed on ${surface}`, async ($, on) => {
-    serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveBox(on, [''])
-    const pane = await mountPane($, surface)
-
-    await pane.press({ key: 'pane-new' })
-
+    expect(log.opened).toEqual(['entry', 'entry'])
     expect(log.fills).toEqual([])
     await pane.unmount()
   })
 
-  test(`+Bug, Handoff, continue and Consolidate fill their prompts and never send on ${surface}`, async ($, on) => {
+  test(`Handoff, continue and Consolidate fill their prompts and never send on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
     const log = serveBox(on)
     const band = await mountBand($, surface)
     const pane = await mountPane($, surface)
 
-    await pane.press({ key: 'pane-bug' })
     for (const key of ['handoff', 'continue', 'consolidate']) await band.press({ key })
 
-    expect(log.fills).toHaveLength(4)
-    const [bug, handoff, resume, consolidate] = log.fills
-    expect(bug).toMatch(/^\/wayfinder/)
-    expect(bug).toMatch(/duplicate/i)
-    expect(bug).toContain('bug')
-    expect(bug).toContain('needs-triage')
+    expect(log.fills).toHaveLength(3)
+    const [handoff, resume, consolidate] = log.fills
     expect(handoff).toMatch(/^\/handoff/)
     expect(resume).toMatch(/handoff file/i)
     expect(consolidate).toMatch(/consolidation/i)
@@ -244,29 +224,16 @@ for (const surface of SURFACES) {
     await band.unmount()
   })
 
-  test(`/deck new says nothing started when the question is dismissed on ${surface}`, async ($, on) => {
+  test(`/deck new and /deck bug open the entry Pane, focused, like their buttons on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveBox(on, [''])
-    serveCommand(on)
-
-    const result = await runDeck($, 'new', surface)
-
-    expect(log.fills).toEqual([])
-    expect(JSON.stringify(result)).toContain('Nothing started.')
-  })
-
-  test(`/deck new and /deck bug behave like their buttons on ${surface}`, async ($, on) => {
-    serveFiles(on, MARKDOWN_TRACKER)
-    const log = serveBox(on, ['Spec'])
+    const log = serveBox(on)
     serveCommand(on)
 
     await runDeck($, 'bug', surface)
     await runDeck($, 'new', surface)
 
-    expect(log.fills).toHaveLength(2)
-    expect(log.fills[0]).toMatch(/^\/wayfinder/)
-    expect(log.fills[0]).toContain('needs-triage')
-    expect(log.fills[1]).toMatch(/^\/grill-with-docs/)
+    expect(log.opened).toEqual(['entry', 'entry'])
+    expect(log.fills).toEqual([])
     expect(log.submitted).toBe(0)
   })
 

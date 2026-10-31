@@ -41,12 +41,16 @@ const serveBox = (on: On, answers: string[] = []) => {
     fills.push(e.text)
     return { isFilled: true }
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const opened: string[] = []
+  on('ui.open', (_, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
   on('tool.call', { tool: 'AskUserQuestion' }, (_, e) => {
     const question = (e as { questions?: { question: string }[] }).questions?.[0]?.question ?? ''
     return { result: { questions: [], answers: { [question]: answers.shift() ?? '' } } } as never
   })
-  return fills
+  return Object.assign(fills, { opened })
 }
 
 /** A store held in memory, shared by every mount in the test. */
@@ -224,16 +228,15 @@ for (const surface of SURFACES) {
 
   test(`the Ready menu offers New Requirement and the BUG menu offers New on ${surface}`, async ($, on) => {
     serveFiles(on, MARKDOWN_TRACKER)
-    const fills = serveBox(on, ['Map'])
+    const fills = serveBox(on)
     const band = await mountBand($, surface)
 
     expect(await keys(band)).toEqual(expect.arrayContaining(['new-requirement', 'new-bug']))
     await band.press({ key: 'new-requirement' })
     await band.press({ key: 'new-bug' })
 
-    expect(fills).toHaveLength(2)
-    expect(fills[0]).toMatch(/^\/wayfinder/)
-    expect(fills[1]).toContain('needs-triage')
+    expect(fills.opened).toEqual(['entry', 'entry'])
+    expect(fills).toHaveLength(0)
     await band.unmount()
   })
 }

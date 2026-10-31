@@ -142,11 +142,10 @@ export const BUG_PROMPT =
   '/wayfinder\n\nI want to report a bug. Ask me questions until the bug is clear, scan the tracker for duplicates, ' +
   'and if there is none file it as a ticket labelled `bug` and `needs-triage`.'
 
-export const HANDOFF_PROMPT = '/handoff'
+/** DSH's `handoff1`; `{ts}` is filled when the button is pressed. */
+export const HANDOFF_PROMPT = TEMPLATES.handoff1
 
 export const CONTINUE_PROMPT = 'Continue from this handoff file: '
 
-export const CONSOLIDATE_PROMPT =
-  'Consolidate what we have settled: restate every question we have answered so far with its answer, ' +
-  'list any possible omissions, and then wait for me. Once I confirm, save them where they belong ' +
-  '(the glossary, an ADR, the spec or the ticket).'
+/** DSH's `fixate`, word for word. */
+export const CONSOLIDATE_PROMPT = TEMPLATES.fixate

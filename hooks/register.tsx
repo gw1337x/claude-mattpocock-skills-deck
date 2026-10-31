@@ -61,7 +61,7 @@ import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyO
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
-import { claim, newTitle, OPENER_BACKGROUND, SESSION_SERVER, START_SESSION, stillOpen } from './session-opener'
+import { claim, newSessionLink, newTitle, stillOpen } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
 
@@ -139,34 +139,28 @@ const applyTitle = async ($: Engine) => {
 const openedKey = async ($: Engine) => `opened:${await repoKey($)}`
 
 /**
- * Runs a prompt in a new session titled `[New] …`. When Desktop cannot open one (no session server, or it refuses),
- * the prompt goes in the box and on the clipboard, with a toast saying so.
+ * Opens a new session with the prompt in its box, through Desktop's `claude://code/new` link (a mod cannot start a
+ * session itself: Desktop refuses it). The person presses send there; that session is then titled `[New] …`. When the
+ * link cannot be opened, the prompt goes in this box and on the clipboard, with a toast saying so.
  */
 const openSession = async ($: Engine, text: string, name: string, surface: RenderSurface, fallbackTitle?: string | null) => {
-  // Noted before the call, so the new session's first message finds its record whenever it arrives.
+  // Noted before the link opens, so the new session's first message finds its record whenever it arrives.
   const now = await $.clock.now()
   const key = await openedKey($)
   const before = stillOpen(await $.store.get(key), now)
-  await $.store.set(key, [...before, { head: headOf(text), at: now }])
+  await $.store.set(key, [...before, { head: headOf(text), title: newTitle(name), at: now }])
   try {
-    const result = await $.mcp.call(SESSION_SERVER, START_SESSION, {
-      initiation: 'own_initiative',
-      title: newTitle(name),
-      prompt: text,
-      background: OPENER_BACKGROUND,
-      context: 'fresh',
-    })
-    if (result.isError) {
-      const said = result.content.map(block => ('text' in block ? String(block.text) : '')).join(' ').trim()
-      throw new Error(said === '' ? 'the session server refused' : said)
-    }
+    const link = newSessionLink(text, await workspaceRoot($))
+    const result = await $.process.run(['powershell', '-NoProfile', '-Command', `Start-Process '${link}'`])
+    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `the link did not open (exit ${result.exitCode})`)
+    $.ui.toast('Opened a new session: check the folder prompt, then press send there.')
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
     debugNote(`Could not open a new session: ${why}`)
     await $.store.set(key, before)
     await fillPrompt($, text, fallbackTitle)
     await $.ui.copy({ text, surface })
-    $.ui.toast(`Could not open a new session here (${why.slice(0, 160)}): the prompt is in the box and copied.`)
+    $.ui.toast(`Could not open a new session (${why.slice(0, 160)}): the prompt is in the box and copied.`)
   }
 }
 
@@ -178,6 +172,7 @@ const claimOpened = async ($: Engine, sent: string) => {
   if (!claimed) return
   await $.store.set(key, rest)
   await $.state.set(OPENED_BY_DECK, true)
+  await $.state.set(PENDING_TITLE, claimed.title)
 }
 
 const BOARD_VIEW = { plugin: 'mattpocock-skills-deck', key: 'boardView' } as const

@@ -12,6 +12,7 @@ import {
   containerAction,
   CONSOLIDATE_PROMPT,
   fill,
+  HANDOFF_NEW_PROMPT,
   HANDOFF_PROMPT,
   healthCheckPrompt,
   progressOf,
@@ -65,6 +66,7 @@ import { DECK_READS, DECK_TOOLS, deckContext, deckIssueReport, DeckRefusal, keyO
 import { ENTRY_MS, pillPrompt, SUGGEST_TOOL, suggestionsOf } from './suggest'
 import { DSH } from './theme'
 import { parseOverrides, promptFor, TEMPLATES_FILE, type Overrides } from './overrides'
+import { HANDOFF_DIR, newestHandoff } from './handoff'
 import { claim, newSessionLink, newTitle, stillOpen } from './session-opener'
 import { appendComment, readTicketDetail } from './ticket'
 import { actionWord, ago, itemFor, numberOf, record, release, routeFrom, rowsOf, touchOf, type RouteEntry, type RouteStore } from './work-route'
@@ -718,6 +720,8 @@ export const register: Register = on => {
     const rows = rowsOf(route, now)
     const latest = rows.find(row => row.session === session)?.entry
     const boardItem = (ticketKey: string) => snapshot.items.find(each => keyOf(backend, each) === ticketKey)
+    // The right half of Handoff stays grey until a handoff doc exists.
+    const handoffDoc = await $.fs.list(HANDOFF_DIR).then(newestHandoff, () => null)
     // Only a score the Checks already worked out; the band never runs the checks itself.
     let envChecks = (await $.state.get(ENV_CHECKS)).value ?? null
     if (envChecks === null && !collapsed && backend === 'markdown') {
@@ -742,7 +746,7 @@ export const register: Register = on => {
       key: string,
       label: string,
       color: string,
-      onPress: () => unknown,
+      onPress: (press: { surface: RenderSurface }) => unknown,
       icon: string,
       word?: string,
       count?: number,
@@ -932,6 +936,18 @@ export const register: Register = on => {
               )}
               {item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', words.has('consolidate') ? 'Consolidate' : undefined)}
               {item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', words.has('handoff') ? 'Handoff' : undefined)}
+              {item(
+                'handoff-new',
+                handoffDoc === null ? 'Handoff · new session (no handoff doc yet)' : 'Handoff · new session',
+                handoffDoc === null ? GREY_INK : BLUE,
+                async press => {
+                  if (handoffDoc === null) return $.ui.toast(`No handoff doc in ${HANDOFF_DIR} yet: press Handoff first.`)
+                  const values = { path: handoffDoc }
+                  const text = promptFor('handoff2', await readOverrides($), fill(HANDOFF_NEW_PROMPT, values), values, debugNote)
+                  await openSession($, text, 'Handoff', press.surface)
+                },
+                '↗',
+              )}
               {item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘')}
               {item(
                 'checks',

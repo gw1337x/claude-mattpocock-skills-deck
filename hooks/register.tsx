@@ -275,10 +275,13 @@ const answerDeckTool = async ($: Engine, name: string, input: Record<string, unk
   }
   if (found === null) throw new DeckRefusal(NO_BACKEND)
   if (name === 'deck_issue_report') {
-    const { item, release: released } = deckIssueReport(await readDeck($, found.backend), input)
+    const { item, release: released, note } = deckIssueReport(await readDeck($, found.backend), input)
     const key = keyOf(found.backend, item)
     if (released) await dropFromRoute($, found.backend, key)
-    else await addToRoute($, found.backend, entryFor(found.backend, item, 'report', 'reported', await $.clock.now()))
+    else {
+      const entry = entryFor(found.backend, item, 'report', 'reported', await $.clock.now())
+      await addToRoute($, found.backend, note === undefined ? entry : { ...entry, note })
+    }
     return { key, title: item.title, state: item.state, route: released ? 'released' : 'reported' }
   }
   const write = (found.backend === 'github' ? GITHUB_WRITES : DECK_WRITES)[name]
@@ -379,7 +382,7 @@ const recordTouch = async ($: Engine, call: Parameters<typeof touchOf>[0]) => {
   if (!touch) return
   const backend = await resolveBackend($)
   const snapshot = (await $.state.get(SNAPSHOT)).value ?? (await readBoard($, backend))
-  const item = itemFor(touch, snapshot.items)
+  const item = touch.feature === null && backend === 'markdown' ? undefined : itemFor(touch, snapshot.items)
   const now = await $.clock.now()
   const entry: RouteEntry = item
     ? entryFor(backend, item, touch.action, 'auto', now)

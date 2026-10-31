@@ -13,6 +13,8 @@ export type RouteEntry = {
   /** `reported` when the model said so with deck_issue_report, `auto` when the deck inferred it from a tool call. */
   source: 'reported' | 'auto'
   hasWork: boolean
+  /** What the model said it was doing when it reported. */
+  note?: string
 }
 
 /** One session's entries. */
@@ -92,7 +94,8 @@ export const record = (route: RouteStore, session: string, entry: RouteEntry, ba
     const index = own.entries.findIndex(each => each.ticketKey === entry.ticketKey)
     const before = own.entries[index]
     if (before === undefined) own.entries.push(entry)
-    else own.entries[index] = { ...entry, source: before.source === 'reported' ? 'reported' : entry.source }
+    else if (before.source === 'reported' && entry.source === 'auto') own.entries[index] = { ...before, actionAt: entry.actionAt }
+    else own.entries[index] = entry
   }
   return { v: 3, at: now, backend, workers }
 }

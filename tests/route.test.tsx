@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { boxTexts, buttonLabels } from './board-text'
+import { boxTexts, buttonLabels, buttonNames } from './board-text'
 import { serveFiles } from './serve-files'
 
 const BAND = {
@@ -236,7 +236,8 @@ for (const surface of SURFACES) {
     serveSession(on, held)
     await clock.set(1_000)
     const band = await mountBand($, surface)
-    expect(await buttonLabels(band)).toContain('Work Route')
+    // At 80 columns the desktop's Route chip has folded its word: the icon, then the ticket once there is one.
+    expect(await buttonNames(band)).toContain(surface === 'terminal' ? 'Work Route' : '⌖')
 
     await $.tool.call({ tool: 'Bash', command: 'gh issue comment 12 --body "hi"' })
     await clock.advance(5 * 60_000)
@@ -244,7 +245,7 @@ for (const surface of SURFACES) {
 
     expect(mine(held).map(e => e.ticketKey)).toEqual(['#12', 'checkout-ux/02'])
     expect(mine(held)[0]).toMatchObject({ action: 'commented', source: 'auto' })
-    expect(await buttonLabels(band)).toContain('Work Route #2')
+    expect(await buttonNames(band)).toContain(surface === 'terminal' ? 'Work Route #2' : '⌖ #2')
     await band.unmount()
   })
 

@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { MARKDOWN_TRACKER } from './fixture'
-import { listCounts, buttonLabels, cardTexts, isOn } from './board-text'
+import { listCounts, buttonLabels, buttonNames, cardTexts, isOn } from './board-text'
 import { serveFiles } from './serve-files'
 
 const PANE = {
@@ -108,10 +108,10 @@ for (const surface of SURFACES) {
     const pane = await mountPane($, surface)
 
     expect(await listCounts(pane)).toEqual({ ready: 3, blocked: 1, closed: 1 })
-    const shown = await buttonLabels(band)
-    expect(shown).toContain('Ready 3')
-    expect(shown).toContain('Bug 1')
-    expect(shown).toContain('Triage 2')
+    // The terminal names each count; the desktop draws its chip's icon, count and word instead.
+    const shown = await buttonNames(band)
+    const want = surface === 'terminal' ? ['Ready 3', 'Bug 1', 'Triage 2'] : ['⊙ 3 Ready', '⚠ 1 BUG', '⌕ 2 Triage']
+    for (const name of want) expect(shown).toContain(name)
     await band.unmount()
     await pane.unmount()
   })

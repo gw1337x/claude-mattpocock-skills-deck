@@ -62,3 +62,9 @@ export const isOn = async (ui: object, key: string): Promise<boolean> =>
 /** What each Button is named, whatever icon text it draws. */
 export const buttonLabels = async (ui: object): Promise<string[]> =>
   (await asDrawn(ui).findAll({ type: 'Button' })).map(button => String(button.props.label ?? ''))
+
+/** What each Button shows: its label, or, unlabelled (a graphical surface's capsule), its own text with the spacing closed up. */
+export const buttonNames = async (ui: object): Promise<string[]> =>
+  (await asDrawn(ui).findAll({ type: 'Button' })).map(button =>
+    typeof button.props.label === 'string' ? button.props.label : textOf(button).replace(/\s+/g, ' ').trim(),
+  )

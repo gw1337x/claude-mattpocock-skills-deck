@@ -892,6 +892,14 @@ const PURPLE = DSH.map
 const BLUE = DSH.link
 const GREY_INK = DSH.muted
 
+/** An accent at `alpha` opacity, for a chip's wash; a theme key (no hex to thin) washes in a neutral grey that reads on either theme. */
+const tint = (color: string, alpha: number): string => {
+  const step = Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0')
+  return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${step}` : `#808080${step}`
+}
+
 /** How old the snapshot may get before the band's time turns red. */
 const STALE_MS = 30 * 60_000
 
@@ -1269,7 +1277,14 @@ export const register: Register = on => {
     // The entry animation plays only while the pills are new, and never for someone who asked for reduced motion.
     const entering = Svg !== undefined && suggestions !== null && now - suggestions.at < ENTRY_MS && !(await reducedMotion($))
 
-    /** One control of the capsule: an icon, a score, a count and a word, all in one colour, named by `label`; `scope` joins a hover group. */
+    // A graphical surface draws a Button's `label` in place of its children, so there the capsule's Buttons go unlabelled and draw their icons and colours.
+    const graphical = e.surface !== 'terminal'
+
+    /**
+     * One control of the capsule: an icon, a score, a count and a word, named by `label`; `scope` joins a hover group.
+     * On a graphical surface it is a chip: the icon and count in the accent, the word in the text colour, a tint under the pointer;
+     * a `badge` (a count above zero) keeps its tint at rest.
+     */
     const item = (
       key: string,
       label: string,
@@ -1280,7 +1295,30 @@ export const register: Register = on => {
       count?: number,
       scope?: string,
       score?: string,
+      badge?: boolean,
     ) => {
+      if (graphical) {
+        // A muted accent (a zero count, an idle tool) keeps its word muted too.
+        const ink = color === GREY_INK ? GREY_INK : DSH.text
+        return (
+          <Box
+            key={`${key}:scope`}
+            flexShrink={0}
+            flexDirection="row"
+            alignItems="center"
+            paddingX="xs"
+            backgroundColor={badge ? tint(color, 0.14) : undefined}
+            hover={{ ...(scope === undefined ? {} : { scope }), backgroundColor: tint(color, badge ? 0.26 : 0.12) }}
+          >
+            <Button key={key} plain onPress={onPress}>
+              <Text color={color}>{icon}</Text>
+              {score !== undefined && <Text color={color} weight="semibold" tabular>{` ${score}`}</Text>}
+              {count !== undefined && <Text color={color} weight="bold" tabular>{` ${count}`}</Text>}
+              {word !== undefined && <Text color={ink} weight="medium">{` ${word}`}</Text>}
+            </Button>
+          </Box>
+        )
+      }
       const button = (
         <Button key={key} label={label} plain onPress={onPress}>
           <Text color={color}>{icon}</Text>
@@ -1297,6 +1335,18 @@ export const register: Register = on => {
         </Box>
       )
     }
+    /** A hairline between the capsule's groups: brand, counts, actions, tools. */
+    const divider = (key: string) => (
+      <Text key={`divider:${key}`} color={DSH.borderQuiet} dimColor>
+        │
+      </Text>
+    )
+    /** One group of the capsule: its items keep their order and never shrink out of the row. */
+    const group = (key: string, ...children: RenderChildren[]) => (
+      <Box key={`group:${key}`} flexDirection="row" flexShrink={0} alignItems="center" columnGap={graphical ? 'xs' : 'sm'}>
+        {children}
+      </Box>
+    )
 
     // Words fold in DSH's priority order as the width shrinks; icons, counts and scores stay.
     const timeAgo = ago(snapshot.readAt, now)
@@ -1314,7 +1364,8 @@ export const register: Register = on => {
       { id: 'refresh', fixed: 2, word: cells(` ${timeAgo}`), priority: FOLD_PRIORITY.refresh },
       { id: 'skills', fixed: 2, word: cells(' Skills'), priority: FOLD_PRIORITY.skills },
     ]
-    const words = wordsShown(segments, e.props.bodyColumns)
+    // The three dividers and the chips' padding cost a graphical surface a few cells more than the terminal's row.
+    const words = wordsShown(segments, e.props.bodyColumns - (graphical ? 6 : 0))
 
     return (
       <Box flexDirection="column" flexShrink={0} marginTop="sm" rowGap="xs">
@@ -1449,7 +1500,16 @@ export const register: Register = on => {
           </Box>
         )}
         {collapsed ? (
-          <Box key="status-collapsed" flexDirection="row" flexShrink={0}>
+          <Box
+            key="status-collapsed"
+            flexDirection="row"
+            flexShrink={0}
+            alignSelf="flex-start"
+            borderStyle="round"
+            borderColor={DSH.borderQuiet}
+            paddingX="sm"
+            hover={{ borderColor: PURPLE }}
+          >
             {item('band-expand', 'Expand Skills Deck', GREY_INK, () => setCollapsed($, false), '⌃', 'Expand Skills Deck')}
           </Box>
         ) : (
@@ -1460,80 +1520,98 @@ export const register: Register = on => {
               flexWrap="nowrap"
               justifyContent="space-between"
               alignItems="center"
-              columnGap="xs"
+              columnGap="sm"
               borderStyle="round"
-              borderColor={DSH.border}
-              paddingX="sm"
+              borderColor={DSH.borderQuiet}
+              paddingX={graphical ? 'sm' : 'md'}
               overflow="hidden"
             >
-              {item('open-deck', 'Skills Deck', DSH.text, () => openBoard($, { filter: 'all', chips: [] }), '◷', words.has('brand') ? 'Skills Deck' : undefined)}
-              {item(
-                'route',
-                latest ? `Work Route #${numberOf(latest.ticketKey)}` : 'Work Route',
-                routeOpen ? BLUE : GREY_INK,
-                () => $.state.set(ROUTE_OPEN, !routeOpen),
-                '⌖',
-                words.has('route') ? 'Route' : undefined,
-                undefined,
-                undefined,
-                routeId || undefined,
+              {group(
+                'identity',
+                item('open-deck', 'Skills Deck', PURPLE, () => openBoard($, { filter: 'all', chips: [] }), '◷', words.has('brand') ? 'Skills Deck' : undefined),
+                item(
+                  'route',
+                  latest ? `Work Route #${numberOf(latest.ticketKey)}` : 'Work Route',
+                  routeOpen ? BLUE : GREY_INK,
+                  () => $.state.set(ROUTE_OPEN, !routeOpen),
+                  '⌖',
+                  words.has('route') ? 'Route' : undefined,
+                  undefined,
+                  undefined,
+                  routeId || undefined,
+                ),
               )}
-              {item('count:ready', `Ready ${ready}`, GREEN, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', words.has('ready') ? 'Ready' : undefined, ready, 'menu:ready')}
-              {item('count:bug', `Bug ${bugs}`, RED, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', words.has('bug') ? 'BUG' : undefined, bugs, 'menu:bug')}
-              {item(
-                'count:needs-triage',
-                `Triage ${needsTriage}`,
-                AMBER,
-                () => openBoard($, { filter: 'open', chips: ['needs-triage'] }),
-                '⌕',
-                words.has('triage') ? 'Triage' : undefined,
-                needsTriage,
+              {divider('identity')}
+              {group(
+                'counts',
+                item('count:ready', `Ready ${ready}`, ready > 0 ? GREEN : GREY_INK, () => openBoard($, { filter: 'ready', chips: [] }), '⊙', words.has('ready') ? 'Ready' : undefined, ready, 'menu:ready', undefined, true),
+                item('count:bug', `Bug ${bugs}`, bugs > 0 ? RED : GREY_INK, () => openBoard($, { filter: 'open', chips: ['bug'] }), '⚠', words.has('bug') ? 'BUG' : undefined, bugs, 'menu:bug', undefined, true),
+                item(
+                  'count:needs-triage',
+                  `Triage ${needsTriage}`,
+                  needsTriage > 0 ? AMBER : GREY_INK,
+                  () => openBoard($, { filter: 'open', chips: ['needs-triage'] }),
+                  '⌕',
+                  words.has('triage') ? 'Triage' : undefined,
+                  needsTriage,
+                  'menu:triage',
+                  undefined,
+                  true,
+                ),
               )}
-              {item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', words.has('consolidate') ? 'Consolidate' : undefined)}
-              {item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', words.has('handoff') ? 'Handoff' : undefined)}
-              {item(
-                'handoff-new',
-                handoffDoc === null ? 'Handoff · new session (no handoff doc yet)' : 'Handoff · new session',
-                handoffDoc === null ? GREY_INK : BLUE,
-                async press => {
-                  if (handoffDoc === null) return $.ui.toast(`No handoff doc in ${HANDOFF_DIR} yet: press Handoff first.`)
-                  const values = { path: handoffDoc }
-                  const text = promptFor('handoff2', await readOverrides($), fill(HANDOFF_NEW_PROMPT, values), values, debugNote)
-                  await openSession($, text, 'Handoff', press.surface)
-                },
-                '↗',
+              {divider('counts')}
+              {group(
+                'actions',
+                item('consolidate', 'Consolidate', PURPLE, () => quickPrompt($, 'fixate', CONSOLIDATE_PROMPT), '▤', words.has('consolidate') ? 'Consolidate' : undefined),
+                item('handoff', 'Handoff', BLUE, () => quickPrompt($, 'handoff1', HANDOFF_PROMPT), '⇆', words.has('handoff') ? 'Handoff' : undefined),
+                item(
+                  'handoff-new',
+                  handoffDoc === null ? 'Handoff · new session (no handoff doc yet)' : 'Handoff · new session',
+                  handoffDoc === null ? GREY_INK : BLUE,
+                  async press => {
+                    if (handoffDoc === null) return $.ui.toast(`No handoff doc in ${HANDOFF_DIR} yet: press Handoff first.`)
+                    const values = { path: handoffDoc }
+                    const text = promptFor('handoff2', await readOverrides($), fill(HANDOFF_NEW_PROMPT, values), values, debugNote)
+                    await openSession($, text, 'Handoff', press.surface)
+                  },
+                  '↗',
+                ),
+                item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘'),
               )}
-              {item('continue', 'Continue from a handoff', BLUE, () => quickPrompt($, 'handoff2', CONTINUE_PROMPT), '⎘')}
-              {item(
-                'checks',
-                env === null ? 'Checks' : `Checks ${env.passed}/${env.total}`,
-                envColor,
-                async () => {
-                  await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
-                  await $.state.set(TAB, 'checks')
-                  await $.state.set(DETAIL, null)
-                  await $.ui.open({ id: PANE, title: PANE_TITLE })
-                },
-                env !== null && env.passed < env.total ? '⚠' : '✓',
-                words.has('env') ? 'Env' : undefined,
-                undefined,
-                undefined,
-                env === null ? undefined : `${env.passed}/${env.total}`,
+              {divider('actions')}
+              {group(
+                'tools',
+                item(
+                  'checks',
+                  env === null ? 'Checks' : `Checks ${env.passed}/${env.total}`,
+                  envColor,
+                  async () => {
+                    await $.state.set(ENV_CHECKS, await runEnvChecks($, await resolveBackend($)))
+                    await $.state.set(TAB, 'checks')
+                    await $.state.set(DETAIL, null)
+                    await $.ui.open({ id: PANE, title: PANE_TITLE })
+                  },
+                  env !== null && env.passed < env.total ? '⚠' : '✓',
+                  words.has('env') ? 'Env' : undefined,
+                  undefined,
+                  undefined,
+                  env === null ? undefined : `${env.passed}/${env.total}`,
+                ),
+                refreshing && Svg && <Svg key="refresh-spin" source={SPIN_SVG} alt="Refreshing" width={16} height={16} />,
+                item(
+                  'refresh-band',
+                  refreshing ? 'Refreshing' : tooltip,
+                  stale ? RED : GREY_INK,
+                  () => refresh($),
+                  refreshing ? (Svg ? ' ' : '◌') : '↻',
+                  words.has('refresh') ? timeAgo : undefined,
+                  undefined,
+                  'tip:refresh',
+                ),
+                item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞', words.has('skills') ? 'Skills' : undefined),
+                debugging && item('debug-dot', 'Debug log', GREY_INK, () => undefined, '●', undefined, undefined, 'menu:debug'),
+                item('band-collapse', 'Collapse', GREY_INK, () => setCollapsed($, true), '⌄'),
               )}
-              {refreshing && Svg && <Svg key="refresh-spin" source={SPIN_SVG} alt="Refreshing" width={16} height={16} />}
-              {item(
-                'refresh-band',
-                refreshing ? 'Refreshing' : tooltip,
-                stale ? RED : GREY_INK,
-                () => refresh($),
-                refreshing ? (Svg ? ' ' : '◌') : '↻',
-                words.has('refresh') ? timeAgo : undefined,
-                undefined,
-                'tip:refresh',
-              )}
-              {item('skills-menu', 'Skills', menuOpen ? BLUE : GREY_INK, () => $.state.set(SKILLS_MENU, !menuOpen), '⊞', words.has('skills') ? 'Skills' : undefined)}
-              {debugging && item('debug-dot', 'Debug log', GREY_INK, () => undefined, '●', undefined, undefined, 'menu:debug')}
-              {item('band-collapse', 'Collapse', GREY_INK, () => setCollapsed($, true), '⌄')}
             </Box>
             {/* One fixed row the hovered segment's menu or tooltip swaps into, so a hover never moves the capsule. */}
             <Box key="status-reveal" position="relative" height={1}>

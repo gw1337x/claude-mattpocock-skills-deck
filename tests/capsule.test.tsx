@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { wordsShown, FOLD_PRIORITY, type Segment } from '../hooks/capsule'
-import { buttonLabels } from './board-text'
+import { buttonNames } from './board-text'
 import { MARKDOWN_TRACKER } from './fixture'
 import { serveFiles } from './serve-files'
 
@@ -31,7 +31,7 @@ type Ui = {
 const mountBand = ($: Engine, surface: (typeof SURFACES)[number], columns = 120) =>
   $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: columns }, surface }) as Promise<Ui>
 const keys = async (ui: Ui) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '')
-const labels = (ui: Ui) => buttonLabels(ui)
+const labels = (ui: Ui) => buttonNames(ui)
 const texts = async (ui: Ui) => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
 
 const serveBox = (on: On, answers: string[] = []) => {
@@ -129,7 +129,7 @@ for (const surface of SURFACES) {
     for (const word of ['Skills Deck', 'Consolidate', 'Handoff', 'Ready', 'BUG', 'Triage']) expect(wideTexts).toContain(word)
     await wide.unmount()
 
-    const middle = await mountBand($, surface, 70)
+    const middle = await mountBand($, surface, 76)
     const middleTexts = (await texts(middle)).join('|')
     expect(middleTexts).not.toContain('Skills Deck')
     expect(middleTexts).toContain('Ready')
@@ -187,7 +187,7 @@ for (const surface of SURFACES) {
     }) as never)
     const band = await mountBand($, surface)
 
-    expect(await labels(band)).toContainEqual(expect.stringMatching(/^Checks \d+\/\d+$/))
+    expect(await labels(band)).toContainEqual(expect.stringMatching(surface === 'terminal' ? /^Checks \d+\/\d+$/ : /^[✓⚠] \d+\/\d+ Env$/))
     expect((await texts(band)).some(text => /^ \d+\/\d+$/.test(text))).toBe(true)
     await band.press({ key: 'checks' })
     await band.unmount()
@@ -205,7 +205,9 @@ for (const surface of SURFACES) {
     await clock.set(Date.UTC(2026, 9, 31, 4, 5, 6, 7))
     const band = await mountBand($, surface)
 
-    expect(await labels(band)).toContainEqual(expect.stringMatching(/^Updated just now, read at \d\d:\d\d$/))
+    // The terminal names the arrow with the tooltip; both draw it in the reveal row under the pointer.
+    if (surface === 'terminal') expect(await labels(band)).toContainEqual(expect.stringMatching(/^Updated just now, read at \d\d:\d\d$/))
+    expect(await texts(band)).toContainEqual(expect.stringMatching(/^Updated just now, read at \d\d:\d\d$/))
     expect(await texts(band)).toContain('↻')
 
     // A first refresh scores the setup, so a draw during the next one has nothing slow to wait for.
@@ -216,12 +218,13 @@ for (const surface of SURFACES) {
     })
     const pressed = band.press({ key: 'refresh-band' })
     const spinning = await mountBand($, surface)
-    expect(await labels(spinning)).toContain('Refreshing')
+    if (surface === 'terminal') expect(await labels(spinning)).toContain('Refreshing')
     // A surface with images turns a ring; one without shows a still one. Either way the idle arrow is gone.
     expect(await texts(spinning)).not.toContain('↻')
     release()
     await pressed
-    expect(await labels(spinning)).not.toContain('Refreshing')
+    if (surface === 'terminal') expect(await labels(spinning)).not.toContain('Refreshing')
+    expect(await texts(spinning)).toContain('↻')
     await spinning.unmount()
     await band.unmount()
   })
